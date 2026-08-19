@@ -20,16 +20,24 @@ export async function GET(request: Request) {
 
     // 1. CARI DI DATABASE LOKAL
     const localResults = await prisma.anime.findMany({
-      where: {
-        OR: [
-          { title: { contains: query, mode: "insensitive" } },
-          { alternativeTitle: { contains: query, mode: "insensitive" } },
-        ],
-      },
-      take: 15,
-    });
+  where: {
+    OR: [
+      { title: { contains: query, mode: "insensitive" } },
+      { alternativeTitle: { contains: query, mode: "insensitive" } },
+    ],
+  },
+  take: 15,
+});
 
-    console.log(`[DB] Ditemukan lokal: ${localResults.length} anime`);
+console.log(`[DB] Ditemukan lokal: ${localResults.length} anime`);
+
+// BINTANG UTAMA: Jika lokal ada data, LANGSUNG RETURN! (Bikin pencarian <50ms)
+if (localResults.length > 0) {
+  return NextResponse.json({
+    success: true,
+    data: localResults.map((a) => ({ ...a, isLocal: true })),
+  });
+}
 
     // 2. CARI SECARA LIVE KE SAMEHADAKU
     let liveResults: any[] = [];

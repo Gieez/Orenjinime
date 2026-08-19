@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
@@ -19,9 +22,9 @@ async function getOrScrapeAnime(slug: string) {
   });
 
   // Jika anime sudah ada DAN episodenya TIDAK KOSONG, kembalikan langsung
-  if (existingAnime && existingAnime.episodes.length > 0) {
-    return existingAnime;
-  }
+  // if (existingAnime && existingAnime.episodes.length > 0) {
+  //   return existingAnime;
+  // }
 
   // 2. On-Demand Scraping jika data belum ada ATAU episode-nya kosong
   try {
