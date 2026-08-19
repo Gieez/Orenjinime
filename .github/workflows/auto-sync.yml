@@ -32,4 +32,4 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         # Tambahkan --esm kalau project lu pakai ES Module
-        run: npx ts-node scripts/sync.ts
+        run: npx tsx scripts/sync.ts
