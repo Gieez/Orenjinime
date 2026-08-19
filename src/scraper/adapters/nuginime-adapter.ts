@@ -205,6 +205,47 @@ export class NugiAnimeAdapter implements SourceAdapter {
     }
   }
 
+  public parseHomepage(html: string): CatalogItem[] {
+    // Karena logikanya mirip dengan scrapeCatalog, kita bisa panggil atau sesuaikan langsung
+    const $ = cheerio.load(html);
+    const items: CatalogItem[] = [];
+
+    const $cards = $(".justpost .post-show ul li, .post-show ul li").not(".widget_senishi_topten li");
+
+    $cards.each((_, el) => {
+      const $el = $(el);
+      const title = clean($el.find("h2.entry-title a, .title a, .entry-title").first().text()) || "";
+      const url = $el.find("h2.entry-title a, .thumb a, a").first().attr("href") || "";
+      
+      let slug = "";
+      if (url) {
+        const urlParts = url.replace(/\/+$/, "").split("/");
+        slug = urlParts[urlParts.length - 1];
+      }
+
+      const poster = clean(
+        $el.find(".thumb img").attr("src") || 
+        $el.find(".thumb img").attr("data-src")
+      ) || null;
+
+      const episodeNum = clean($el.find("span author, .eps, .epx").first().text());
+
+      if (title && slug) {
+        items.push({
+          title,
+          slug,
+          sourceUrl: absoluteUrl(this.baseUrl, url),
+          poster,
+          status: parseStatus(episodeNum),
+          type: AnimeType.TV,
+          rating: null,
+        });
+      }
+    });
+
+    return items;
+  }
+
   public async scrapeCatalog(html: string): Promise<CatalogScrapeResult> {
     const $ = cheerio.load(html);
     const items: CatalogItem[] = [];
