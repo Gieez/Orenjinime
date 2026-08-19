@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AnimeStatus {
+  ONGOING
+  COMPLETED
+  UPCOMING
+}
+
+enum AnimeType {
+  TV
+  MOVIE
+  OVA
+  ONA
+  SPECIAL
+}
+
+model Anime {
+  id                   String         @id @default(cuid())
+  title                String
+  alternativeTitle     String?
+  slug                 String         @unique
+  synopsis             String?
+  poster               String?
+  banner               String?
+  year                 Int?           // (Atau String?, sesuaikan kalau error)
+  status               AnimeStatus    @default(ONGOING)
+  type                 AnimeType      @default(TV)
+  studio               String?
+  rating               Float?
+  popularity           Float?         // (Atau Int?)
+  sourceUrl            String?
+  externalId           String?
+  latestOrder          Int?
+  
+  topOrder             Int?
+  
+  latestEpisodeRelease DateTime?      
+  lastScrapedAt        DateTime?
+  contentHash          String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  // 👇 Relasi yang tadi gak sengaja kehapus
+  episodes             Episode[]
+  genres               GenreOnAnime[]
+  producers            ProducerOnAnime[]
+  schedules            Schedule[]
+}
+
+model Genre {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  animes GenreOnAnime[]
+}
+
+model GenreOnAnime {
+  animeId String
+  genreId String
+
+  anime Anime @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  genre Genre @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([animeId, genreId])
+  @@index([genreId])
+}
+
+model Producer {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  animes ProducerOnAnime[]
+}
+
+model ProducerOnAnime {
+  animeId    String
+  producerId String
+
+  anime    Anime    @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  producer Producer @relation(fields: [producerId], references: [id], onDelete: Cascade)
+
+  @@id([animeId, producerId])
+  @@index([producerId])
+}
+
+model Episode {
+  id            String    @id @default(cuid())
+  animeId       String
+  episodeNumber Int
+  title         String?
+  sourceUrl     String    @unique
+  releasedAt    DateTime?
+
+  introStart Int?
+  introEnd   Int?
+
+  lastScrapedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  anime         Anime          @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  streamSources StreamSource[]
+  subtitles     Subtitle[]
+
+  @@unique([animeId, episodeNumber])
+  @@index([animeId])
+  @@index([releasedAt])
+}
+
+model StreamSource {
+  id        String  @id @default(cuid())
+  episodeId String
+  name      String
+  url       String
+  type      String  @default("embed")
+  quality   String?
+
+  createdAt DateTime @default(now())
+
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([episodeId])
+}
+
+model Subtitle {
+  id        String @id @default(cuid())
+  episodeId String
+  language  String
+  url       String
+
+  createdAt DateTime @default(now())
+
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@unique([episodeId, language])
+}
+
+model Schedule {
+  id            String @id @default(cuid())
+  animeId       String
+  dayOfWeek     Int
+  airTime       String
+  timezone      String @default("Asia/Jakarta")
+  episodeNumber Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  anime Anime @relation(fields: [animeId], references: [id], onDelete: Cascade)
+
+  @@unique([animeId, dayOfWeek])
+  @@index([dayOfWeek])
+}
+
+model News {
+  id            String    @id @default(cuid())
+  title         String
+  slug          String    @unique
+  content       String    @db.Text
+  thumbnail     String?
+  sourceUrl     String    @unique
+  publishedAt   DateTime?
+  lastScrapedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([publishedAt])
+}
+
+model FailedUrl {
+  id          String   @id @default(cuid())
+  url         String   @unique
+  jobType     String
+  reason      String?
+  attempts    Int      @default(1)
+  lastTriedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([jobType])
+  @@index([lastTriedAt])
+}

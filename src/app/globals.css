@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-neutral-950 text-neutral-100 antialiased;
+}
+
+/* Sembunyikan scrollbar untuk horizontal scroll rows, tanpa mengubah fungsi scroll */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Snap scrolling halus untuk baris anime horizontal */
+.snap-row {
+  scroll-snap-type: x proximity;
+}
+.snap-row > * {
+  scroll-snap-align: start;
+}

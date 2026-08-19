@@ -1,0 +1,51 @@
+{
+  "name": "nugianime",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "scrape": "tsx src/scraper/index.ts",
+    "scrape:catalog": "tsx src/scraper/index.ts --job=catalog",
+    "scrape:schedule": "tsx src/scraper/index.ts --job=schedule",
+    "scrape:news": "tsx src/scraper/index.ts --job=news",
+    "scheduler": "tsx src/scheduler/index.ts",
+    "seed": "tsx src/scheduler/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
+    "dotenv": "^17.4.2",
+    "got-scraping": "^4.2.1",
+    "hls.js": "^1.5.15",
+    "next": "^14.2.13",
+    "p-limit": "^5.0.0",
+    "playwright": "^1.62.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rss-parser": "^3.13.0",
+    "server-only": "^0.0.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.13",
+    "postcss": "^8.4.47",
+    "prettier": "^3.3.3",
+    "prisma": "^5.20.0",
+    "tailwindcss": "^3.4.10",
+    "tsx": "^4.23.12",
+    "typescript": "^5.6.2"
+  }
+}
