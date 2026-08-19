@@ -1,70 +1,31 @@
-import { chromium } from "playwright";
-
 export class HttpClient {
   static async getHtml(url: string): Promise<string> {
     const safeUrl = url
       .replace(/^https?:\/\/?https?:\/\//i, "https://")
       .replace(/^https?:\/\/https\/\//i, "https://");
 
-    const bravePath = "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe";
-
-    const browser = await chromium.launch({ 
-      executablePath: bravePath,
-      headless: false,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled',
-        '--window-size=1280,720'
-      ]
-    }).catch(async () => {
-      return await chromium.launch({ 
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
-      });
-    });
-
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      viewport: { width: 1280, height: 720 },
-      locale: 'id-ID',
-    });
-
-    await context.addInitScript("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})");
-
-    const page = await context.newPage();
-
     try {
-      await page.goto(safeUrl, { 
-        waitUntil: 'domcontentloaded', 
-        timeout: 45000 
+      const response = await fetch(safeUrl, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept":
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+          "Cache-Control": "no-cache",
+          "Pragma": "no-cache",
+        },
+        cache: "no-store",
       });
 
-      const pageTitle = await page.title();
-      console.log(`[PLAYWRIGHT DEBUG] Judul Halaman yang Terbuka: "${pageTitle}"`);
+      if (!response.ok) {
+        throw new Error(`HTTP Error Status: ${response.status}`);
+      }
 
-      // DITAMBAHKAN: Selector .animpost... (kode kamu sebelumnya)
-      await page.waitForFunction(
-        () => 
-          document.querySelector('.post-show') || 
-          document.querySelector('.animpost') || 
-          document.querySelector('.animposx') || 
-          document.querySelector('article') || 
-          document.querySelector('.animepost') ||
-          document.querySelector('.live-search'), 
-        { timeout: 10000 }
-      ).catch(() => {});
-
-      // TAMBAHKAN INI: Scroll sedikit untuk trigger lazy-load di DOM
-      await page.evaluate(() => window.scrollBy(0, 500));
-      await page.waitForTimeout(500); // Tunggu setengah detik setelah scroll
-
-      const html = await page.content();
-      await browser.close();
+      const html = await response.text();
       return html;
-
-    } catch (error) {
-      await browser.close();
+    } catch (error: any) {
+      console.error(`[HttpClient Error] Gagal mengambil HTML dari ${safeUrl}:`, error.message);
       throw error;
     }
   }
