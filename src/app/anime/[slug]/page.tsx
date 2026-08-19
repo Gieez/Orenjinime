@@ -4,116 +4,26 @@ export const revalidate = 0;
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { HttpClient } from "@/scraper/http-client";
-import { NugiAnimeAdapter } from "@/scraper/adapters/nuginime-adapter";
 
 interface PageProps {
   params: Promise<{ slug: string }> | { slug: string };
 }
 
-async function getOrScrapeAnime(slug: string) {
-  // 1. Cari di DB Lokal beserta relasi episodenya
-  const existingAnime = await prisma.anime.findUnique({
-    where: { slug },
-    include: {
-      episodes: { orderBy: { episodeNumber: "asc" } },
-      genres: { include: { genre: true } },
-    },
-  });
-
-  // Jika anime sudah ada DAN episodenya TIDAK KOSONG, kembalikan langsung
-  // if (existingAnime && existingAnime.episodes.length > 0) {
-  //   return existingAnime;
-  // }
-
-  // 2. On-Demand Scraping jika data belum ada ATAU episode-nya kosong
+async function getAnimeFromDb(slug: string) {
   try {
-    const adapter = new NugiAnimeAdapter();
-    const sourceUrl = `${adapter.baseUrl}/anime/${slug}/`;
-    const html = await HttpClient.getHtml(sourceUrl);
-
-    if (!html) return existingAnime;
-
-    const detailData = adapter.parseAnimeDetail(html, sourceUrl);
-    const episodeList = adapter.parseEpisodeList(html);
-
-    // Siapkan relasi genre
-    const genreConnections = await Promise.all(
-      (detailData.genres || []).map(async (genreName) => {
-        const genreSlug = genreName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        const g = await prisma.genre.upsert({
-          where: { name: genreName },
-          update: {},
-          create: { name: genreName, slug: genreSlug },
-        });
-        return g.id;
-      })
-    );
-
-    // 3. Gunakan URL 'slug' secara konsisten untuk where dan create guna mencegah konflik
-    const savedAnime = await prisma.anime.upsert({
-      where: { slug }, // 👈 Selalu gunakan slug dari parameter URL
-      update: {
-        title: detailData.title,
-        poster: detailData.poster,
-        synopsis: detailData.synopsis,
-        type: detailData.type ?? undefined,
-        status: detailData.status ?? undefined,
-        rating: detailData.rating,
-        studio: detailData.studio,
-        sourceUrl: detailData.sourceUrl,
-        episodes: {
-          deleteMany: {},
-          create: episodeList.map((ep) => ({
-            episodeNumber: ep.episodeNumber,
-            title: ep.title,
-            sourceUrl: ep.sourceUrl,
-          })),
-        },
-        genres: {
-          deleteMany: {},
-          create: genreConnections.map((genreId) => ({
-            genre: {
-              connect: { id: genreId },
-            },
-          })),
-        },
-      },
-      create: {
-        title: detailData.title,
-        slug: slug, // 👈 Gunakan slug dari parameter URL
-        poster: detailData.poster,
-        synopsis: detailData.synopsis,
-        type: detailData.type ?? undefined,
-        status: detailData.status ?? undefined,
-        rating: detailData.rating,
-        studio: detailData.studio,
-        sourceUrl: detailData.sourceUrl,
-        episodes: {
-          create: episodeList.map((ep) => ({
-            episodeNumber: ep.episodeNumber,
-            title: ep.title,
-            sourceUrl: ep.sourceUrl,
-          })),
-        },
-        genres: {
-          create: genreConnections.map((genreId) => ({
-            genre: {
-              connect: { id: genreId },
-            },
-          })),
-        },
-      },
+    // Hanya ambil dari Database Lokal tanpa proses scraping langsung
+    const anime = await prisma.anime.findUnique({
+      where: { slug },
       include: {
         episodes: { orderBy: { episodeNumber: "asc" } },
         genres: { include: { genre: true } },
       },
     });
 
-    return savedAnime;
+    return anime;
   } catch (error) {
-    console.error(`[ON-DEMAND FAILED] Gagal scrape ${slug}:`, error);
-    return existingAnime;
+    console.error(`[DATABASE ERROR] Gagal mengambil anime ${slug}:`, error);
+    return null;
   }
 }
 
@@ -123,7 +33,7 @@ export default async function AnimeDetailPage({ params }: PageProps) {
 
   if (!slug) notFound();
 
-  const anime = await getOrScrapeAnime(slug);
+  const anime = await getAnimeFromDb(slug);
 
   if (!anime) notFound();
 
@@ -241,7 +151,7 @@ export default async function AnimeDetailPage({ params }: PageProps) {
 
         {anime.episodes.length === 0 ? (
           <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-8 text-center text-sm text-zinc-400">
-            Belum ada episode yang terdeteksi.
+            Belum ada episode yang tersinkronisasi di database.
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
