@@ -1,93 +1,76 @@
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
+
 export class HttpClient {
   /**
-   * Jalur utama: got-scraping — bypass Cloudflare TLS fingerprinting
+   * Fetch HTML via curl — bypass Cloudflare TLS fingerprint detection.
+   * Curl punya TLS fingerprint yang beda dari Node.js fetch / got-scraping,
+   * jadi Cloudflare ga block.
    */
-  private static async fetchViaGotScraping(url: string): Promise<string | null> {
-    try {
-      const { gotScraping } = await import("got-scraping");
-      const response = await gotScraping({
-        url,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-          Referer: "https://v2.samehadaku.how/",
-        },
-        timeout: { request: 15000 },
-      });
+  static async getHtml(url: string): Promise<string> {
+    console.log(`[HttpClient] Fetching via curl: ${url}`);
 
-      if (response.statusCode === 200 && response.body) {
-        if (!response.body.includes("Just a moment...") && !response.body.includes("Enable JavaScript")) {
-          return response.body;
-        }
-      }
-      return null;
-    } catch {
-      return null;
+    const stdout = await this.curl(url);
+    if (!stdout || stdout.length < 500) {
+      throw new Error("Response terlalu pendek / kosong");
     }
+
+    // Cek apakah ada real content
+    const hasRealContent =
+      stdout.includes("/anime/") ||
+      stdout.includes("entry-title") ||
+      stdout.includes("lstepsiode") ||
+      stdout.includes("post-show") ||
+      stdout.includes("wp-admin") ||
+      stdout.includes("itemprop");
+
+    if (!hasRealContent) {
+      throw new Error("Response tidak mengandung konten real (kemungkinan Cloudflare block)");
+    }
+
+    console.log(`[HttpClient] SUKSES via curl! (${stdout.length} chars)`);
+    return stdout;
   }
 
   /**
-   * Jalur fallback: native fetch via CORS proxy chain
+   * Fetch JSON API via curl — skip HTML validation karena JSON ga punya HTML markers.
    */
-  private static async fetchViaProxy(url: string): Promise<string | null> {
-    const safeUrl = url
-      .replace(/^https?:\/\/https?:\/\//i, "https://")
-      .replace(/^https?:\/\/https\/\//i, "https://");
+  static async getJson(url: string): Promise<string> {
+    console.log(`[HttpClient] Fetching JSON via curl: ${url}`);
 
-    const fetchTargets = [
-      { name: "Direct", url: safeUrl },
-      { name: "CorsProxy", url: `https://corsproxy.io/?${encodeURIComponent(safeUrl)}` },
-      { name: "AllOrigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(safeUrl)}` },
-      { name: "CodeTabs", url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(safeUrl)}` },
-    ];
-
-    for (const target of fetchTargets) {
-      try {
-        const response = await fetch(target.url, {
-          headers:
-            target.name === "Direct"
-              ? {
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                  "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-                  Referer: "https://v2.samehadaku.how/",
-                }
-              : {},
-          cache: "no-store",
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (response.ok) {
-          const html = await response.text();
-          if (html && !html.includes("Just a moment...") && !html.includes("Enable JavaScript")) {
-            return html;
-          }
-        }
-      } catch {
-        // skip to next proxy
-      }
+    const stdout = await this.curl(url);
+    if (!stdout || stdout.length < 20) {
+      throw new Error("JSON response kosong");
     }
-    return null;
+
+    // JSON valid? Coba parse quick
+    try {
+      JSON.parse(stdout);
+    } catch {
+      throw new Error("Response bukan JSON valid (kemungkinan Cloudflare block)");
+    }
+
+    console.log(`[HttpClient] SUKSES JSON via curl! (${stdout.length} chars)`);
+    return stdout;
   }
 
-  static async getHtml(url: string): Promise<string> {
-    // Jalur 1: got-scraping (bypass Cloudflare)
-    console.log(`[HttpClient] Mencoba got-scraping...`);
-    const gotResult = await this.fetchViaGotScraping(url);
-    if (gotResult) {
-      console.log(`[HttpClient] SUKSES via got-scraping!`);
-      return gotResult;
+  private static async curl(url: string): Promise<string> {
+    try {
+      const { stdout } = await execAsync(
+        `curl -s -L --max-time 20 ` +
+        `-H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" ` +
+        `-H "Accept-Language: id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7" ` +
+        `-H "Referer: https://v2.samehadaku.how/" ` +
+        `-H "Accept: application/json" ` +
+        `"${url}"`,
+        { maxBuffer: 10 * 1024 * 1024 }
+      );
+      return stdout;
+    } catch (err: any) {
+      console.error(`[HttpClient] curl gagal: ${err?.message}`);
+      throw new Error("Fetch gagal melewatin proteksi Samehadaku.");
     }
-
-    // Jalur 2: Proxy chain fallback
-    console.log(`[HttpClient] got-scraping gagal, mencoba proxy chain...`);
-    const proxyResult = await this.fetchViaProxy(url);
-    if (proxyResult) {
-      console.log(`[HttpClient] SUKSES via proxy!`);
-      return proxyResult;
-    }
-
-    throw new Error("Semua jalur fetch & proxy gagal melewatin proteksi Samehadaku.");
   }
 }

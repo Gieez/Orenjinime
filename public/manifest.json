@@ -1,10 +1,17 @@
 {
-  "name": "Orenjinime",
-  "short_name": "Orenjinime",
-  "description": "Streaming anime terlengkap - katalog, jadwal, dan berita anime.",
+  "name": "OrenJiNime",
+  "short_name": "OrenJiNime",
+  "description": "Streaming anime terlengkap subtitle Indonesia.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
-  "theme_color": "#7C3AED",
-  "icons": []
+  "theme_color": "#f97316",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
 }

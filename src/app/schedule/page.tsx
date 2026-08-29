@@ -18,7 +18,7 @@ const DAYS = [
   { id: "tuesday", label: "Selasa", nume: 2 },
   { id: "wednesday", label: "Rabu", nume: 3 },
   { id: "thursday", label: "Kamis", nume: 4 },
-  { id: "friday", label: "Jumaat", nume: 5 },
+  { id: "friday", label: "Jumat", nume: 5 },
   { id: "saturday", label: "Sabtu", nume: 6 },
   { id: "sunday", label: "Minggu", nume: 7 },
 ];

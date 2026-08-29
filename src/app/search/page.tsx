@@ -106,7 +106,14 @@ function SearchContent() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
           {results.map((a) => (
             <div key={a.slug} className="relative group">
-              <AnimeCard anime={a} />
+              <AnimeCard
+                anime={a}
+                href={
+                  (a as any).isLive && (a as any).sourceUrl
+                    ? `/anime/${a.slug}?sourceUrl=${encodeURIComponent((a as any).sourceUrl)}`
+                    : `/anime/${a.slug}`
+                }
+              />
             </div>
           ))}
         </div>

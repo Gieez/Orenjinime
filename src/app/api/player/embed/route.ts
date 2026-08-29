@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const execAsync = promisify(exec);
 
@@ -165,6 +166,17 @@ function errorPage(message: string): NextResponse {
 
 export async function GET(req: NextRequest) {
   try {
+    // Rate limit: 30 requests per minute per IP (stricter for embed)
+    const ip = getClientIp(req);
+    const rateLimit = checkRateLimit(`embed:${ip}`, 30, 60_000);
+
+    if (!rateLimit.success) {
+      return NextResponse.json(
+        { error: "Too many requests" },
+        { status: 429 }
+      );
+    }
+
     const { searchParams } = req.nextUrl;
     const post = searchParams.get("post");
     const nume = searchParams.get("nume");

@@ -79,24 +79,92 @@ async function runSync() {
       console.error("[Sync] Top 10 sync failed:", err);
     }
 
-    // PHASE 3: Sync schedule data
-    console.log("[Sync] Phase 3: Syncing schedule...");
-    try {
-      const scheduleHtml = await HttpClient.getHtml(adapter.baseUrl);
-      if (scheduleHtml) {
-        const schedules = await adapter.getSchedule(scheduleHtml);
-        for (const item of schedules) {
-          try {
-            await upsertSchedule(item);
-          } catch (err) {
-            console.error(`[Sync] Failed schedule for ${item.animeSlug}:`, err);
+    // PHASE 3: Sync schedule data (SEMUA hari dari WP-JSON API)
+        console.log("[Sync] Phase 3: Syncing schedule (all days)...");
+        try {
+          const DAY_URL_MAP: Record<string, string> = {
+                  Monday: "monday",
+                  Tuesday: "tuesday",
+                  Wednesday: "wednesday",
+                  Thursday: "thursday",
+                  Friday: "friday",
+                  Saturday: "saturday",
+                  Sunday: "sunday",
+                };
+
+                const DAY_NAME_TO_NUM: Record<string, number> = {
+                  Monday: 1,
+                  Tuesday: 2,
+                  Wednesday: 3,
+                  Thursday: 4,
+                  Friday: 5,
+                  Saturday: 6,
+                  Sunday: 0,
+                };
+
+                let totalCount = 0;
+                for (const [dayName, daySlug] of Object.entries(DAY_URL_MAP)) {
+                  try {
+                    const raw = await HttpClient.getJson(
+                      `https://v2.samehadaku.how/wp-json/custom/v1/all-schedule?perpage=500&day=${daySlug}`
+                    );
+              const items = JSON.parse(raw) as Array<{
+                slug: string;
+                title: string;
+                url: string;
+                featured_img_src: string | null;
+                east_time: string | null;
+              }>;
+
+              for (const item of items) {
+                try {
+                  // Upsert anime jika belum ada
+                  let anime = await prisma.anime.findUnique({ where: { slug: item.slug } });
+                  if (!anime) {
+                    const cleanTitle = item.title.replace(/\s*Sub\s*Indo\s*$/i, "").trim();
+                    anime = await prisma.anime.create({
+                      data: {
+                        title: cleanTitle,
+                        slug: item.slug,
+                        poster: item.featured_img_src,
+                        status: "ONGOING",
+                        type: "TV",
+                        sourceUrl: item.url,
+                      },
+                    });
+                  }
+
+                  // Parse jam
+                  const timeMatch = item.east_time?.match(/(\d{1,2}[:.]\d{2})/);
+                  const airTime = timeMatch ? timeMatch[1].replace(".", ":") : item.east_time || "00:00";
+
+                  const dayNum = DAY_NAME_TO_NUM[dayName] ?? 1;
+                                // Upsert schedule
+                                    await prisma.schedule.upsert({
+                                      where: {
+                                        animeId_dayOfWeek: { animeId: anime.id, dayOfWeek: dayNum },
+                                      },
+                                      update: { airTime },
+                                      create: {
+                                        animeId: anime.id,
+                                        dayOfWeek: dayNum,
+                                        airTime,
+                                      },
+                                    });
+                  totalCount++;
+                } catch (err) {
+                  console.error(`[Sync] Failed schedule ${item.slug}:`, err);
+                }
+              }
+              console.log(`[Sync] ${daySlug}: ${items.length} items`);
+            } catch (err) {
+              console.error(`[Sync] Failed fetch ${daySlug} schedule:`, err);
+            }
           }
+          console.log(`[Sync] Synced ${totalCount} schedule entries total.`);
+        } catch (err) {
+          console.error("[Sync] Schedule sync failed:", err);
         }
-        console.log(`[Sync] Synced ${schedules.length} schedule entries.`);
-      }
-    } catch (err) {
-      console.error("[Sync] Schedule sync failed:", err);
-    }
 
     console.log(`[Sync] Complete. Processed ${processed} anime.`);
   } catch (error) {

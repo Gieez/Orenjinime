@@ -2,6 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import VideoPlayer from "@/components/VideoPlayer";
 import Link from "next/link";
+import { SaveWatchHistory } from "@/components/SaveWatchHistory";
+import { AdBanner } from "@/components/AdBanner";
+import { autoScrapeStreamsIfNeeded } from "@/lib/auto-scrape-streams";
+import { autoScrapeAnimeIfNeeded } from "@/lib/auto-scrape";
 
 export default async function WatchPage({
   params,
@@ -13,8 +17,7 @@ export default async function WatchPage({
 
   if (isNaN(episodeNumber)) return notFound();
 
-  // DB-only — no live scraping. Data is pre-populated by cron job.
-  const episode = await prisma.episode.findFirst({
+  let episode = await prisma.episode.findFirst({
     where: {
       episodeNumber: episodeNumber,
       anime: { slug: slug },
@@ -31,7 +34,56 @@ export default async function WatchPage({
     },
   });
 
+  // Kalau episode belum ada di DB → auto-scrape anime + episodes dulu
+  if (!episode) {
+    const animeExists = await prisma.anime.findUnique({ where: { slug } });
+    if (animeExists) {
+      await autoScrapeAnimeIfNeeded(slug);
+
+      // Coba ambil episode lagi
+      episode = await prisma.episode.findFirst({
+        where: {
+          episodeNumber: episodeNumber,
+          anime: { slug: slug },
+        },
+        include: {
+          anime: {
+            include: {
+              episodes: { orderBy: { episodeNumber: "asc" } },
+            },
+          },
+          streamSources: true,
+        },
+      });
+    }
+  }
+
   if (!episode) return notFound();
+
+  // Kalau stream kosong + belum pernah di-scrape → scrape SEKALI
+  let streamsEmpty = !episode.streamSources || episode.streamSources.length === 0;
+  if (streamsEmpty && !episode.lastScrapedAt) {
+    await autoScrapeStreamsIfNeeded(episode.id);
+
+    // Reload episode dari DB
+    const refreshed = await prisma.episode.findFirst({
+      where: { id: episode.id },
+      include: {
+        anime: {
+          include: {
+            episodes: { orderBy: { episodeNumber: "asc" } },
+          },
+        },
+        streamSources: true,
+      },
+    });
+
+    if (refreshed) {
+      streamsEmpty = refreshed.streamSources.length === 0;
+      // Use refreshed data for rendering
+      Object.assign(episode, refreshed);
+    }
+  }
 
   // Navigation helpers
   const allEpisodes = episode.anime.episodes || [];
@@ -69,10 +121,18 @@ export default async function WatchPage({
         />
       </div>
 
+      {/* Auto-save to watch history */}
+      <SaveWatchHistory
+        slug={episode.anime.slug}
+        title={episode.anime.title}
+        poster={episode.anime.poster}
+        episodeNumber={episode.episodeNumber}
+      />
+
       {/* Stream sources empty warning */}
-      {(!episode.streamSources || episode.streamSources.length === 0) && (
+      {streamsEmpty && (
         <div className="mt-4 rounded-xl border border-yellow-800 bg-yellow-900/20 p-4 text-sm text-yellow-300">
-          Sumber streaming belum tersedia untuk episode ini. Data akan diperbarui oleh sistem sinkronisasi otomatis.
+          Sumber video (Server) tidak tersedia atau kosong.
         </div>
       )}
 
@@ -138,6 +198,9 @@ export default async function WatchPage({
           {episode.anime.synopsis || "Sinopsis belum tersedia."}
         </p>
       </div>
+
+      {/* Ad Banner — bottom */}
+      <AdBanner position="bottom" />
     </main>
   );
 }

@@ -175,9 +175,9 @@ function parseRelativeDate(text: string, now = new Date()): Date | null {
 function cleanSynopsis(text?: string | null): string | undefined {
   if (!text) return undefined;
   return text
-    .replace(/\bsamehadaku\b/gi, "OrenGiNime")
-    .replace(/\bsamehadaku\.how\b/gi, "OrenGiNime")
-    .replace(/\bv2\.samehadaku\.how\b/gi, "OrenGiNime")
+    .replace(/\bsamehadaku\b/gi, "OrenJiNime")
+    .replace(/\bsamehadaku\.how\b/gi, "OrenJiNime")
+    .replace(/\bv2\.samehadaku\.how\b/gi, "OrenJiNime")
     .trim() || undefined;
 }
 

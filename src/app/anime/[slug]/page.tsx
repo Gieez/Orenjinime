@@ -4,14 +4,17 @@ export const revalidate = 0;
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { EpisodeList } from "@/components/EpisodeList";
+import { autoScrapeAnimeIfNeeded } from "@/lib/auto-scrape";
+import { scrapeAndSaveAnime } from "@/lib/scrape-and-save";
 
 interface PageProps {
   params: Promise<{ slug: string }> | { slug: string };
+  searchParams: Promise<{ sourceUrl?: string }> | { sourceUrl?: string };
 }
 
 async function getAnimeFromDb(slug: string) {
   try {
-    // Hanya ambil dari Database Lokal tanpa proses scraping langsung
     const anime = await prisma.anime.findUnique({
       where: { slug },
       include: {
@@ -20,6 +23,21 @@ async function getAnimeFromDb(slug: string) {
       },
     });
 
+    // Kalau anime ada tapi episode kosong → auto-scrape
+    if (anime && anime.episodes.length === 0 && anime.sourceUrl) {
+      await autoScrapeAnimeIfNeeded(slug);
+
+      // Reload dari DB setelah scrape
+      const updated = await prisma.anime.findUnique({
+        where: { slug },
+        include: {
+          episodes: { orderBy: { episodeNumber: "asc" } },
+          genres: { include: { genre: true } },
+        },
+      });
+      return updated;
+    }
+
     return anime;
   } catch (error) {
     console.error(`[DATABASE ERROR] Gagal mengambil anime ${slug}:`, error);
@@ -27,13 +45,22 @@ async function getAnimeFromDb(slug: string) {
   }
 }
 
-export default async function AnimeDetailPage({ params }: PageProps) {
+export default async function AnimeDetailPage({ params, searchParams }: PageProps) {
   const resolvedParams = await params;
+  const resolvedSearchParams = await searchParams;
   const slug = resolvedParams?.slug;
+  const sourceUrl = resolvedSearchParams?.sourceUrl;
 
   if (!slug) notFound();
 
-  const anime = await getAnimeFromDb(slug);
+  let anime = await getAnimeFromDb(slug);
+
+  // Kalau anime belum ada di DB + ada sourceUrl dari live search → scrape & save
+  if (!anime && sourceUrl) {
+    console.log(`[AnimeDetail] "${slug}" belum ada di DB, scrape dari sourceUrl...`);
+    await scrapeAndSaveAnime(slug, sourceUrl);
+    anime = await getAnimeFromDb(slug);
+  }
 
   if (!anime) notFound();
 
@@ -149,28 +176,11 @@ export default async function AnimeDetailPage({ params }: PageProps) {
           )}
         </h2>
 
-        {anime.episodes.length === 0 ? (
-          <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-8 text-center text-sm text-zinc-400">
-            Belum ada episode yang tersinkronisasi di database.
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
-            {anime.episodes.map((ep) => (
-              <Link
-                key={ep.id}
-                href={`/watch/${anime.slug}/${ep.episodeNumber}`}
-                className="group relative flex flex-col items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/80 p-3 transition-all duration-200 hover:border-orange-500 hover:bg-orange-600 hover:shadow-lg hover:shadow-orange-600/20 active:scale-95"
-              >
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 group-hover:text-white/80">
-                  Episode
-                </div>
-                <div className="text-lg font-black text-zinc-100 group-hover:text-white">
-                  {ep.episodeNumber}
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
+        <EpisodeList
+          episodes={anime.episodes}
+          animeSlug={anime.slug}
+          defaultVisible={24}
+        />
       </section>
     </main>
   );
