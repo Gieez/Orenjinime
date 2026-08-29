@@ -1,5 +1,4 @@
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 3600; // ISR: cache 1 jam, auto-scrape jalan saat rebuild
 
 import { notFound } from "next/navigation";
 import Link from "next/link";

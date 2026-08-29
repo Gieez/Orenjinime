@@ -1,3 +1,5 @@
+export const revalidate = 3600; // ISR: cache 1 jam
+
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import VideoPlayer from "@/components/VideoPlayer";
