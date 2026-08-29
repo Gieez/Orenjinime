@@ -1,7 +1,8 @@
 import { prisma } from "../lib/prisma";
-import { logger } from "./utils/logger";
+import { HttpClient } from "./http-client";
 import { NugiAnimeAdapter } from "./adapters/nuginime-adapter";
-import { runScheduleScrape } from "./schedule/scrape";
+import { logger } from "./utils/logger";
+import { upsertSchedule } from "./persist/upsert";
 
 const adapter = new NugiAnimeAdapter();
 
@@ -17,7 +18,7 @@ let shuttingDown = false;
 async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
-  logger.log("SCRAPER", `Menerima ${signal}, menutup koneksi database...`);
+  logger.log("SCRAPER", `Received ${signal}, closing database connection...`);
   await prisma.$disconnect();
   process.exit(0);
 }
@@ -27,18 +28,31 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 async function main() {
   const job = parseJobArg();
-  logger.log("SCRAPER", `Menjalankan job scraper: [${job.toUpperCase()}]`);
+  logger.log("SCRAPER", `Running scraper job: [${job.toUpperCase()}]`);
 
   try {
     if (job === "schedule" || job === "all") {
-      logger.log("SCRAPER", "Memulai scraping schedule...");
-      await runScheduleScrape(adapter);
+      logger.log("SCRAPER", "Starting schedule scrape...");
+      const html = await HttpClient.getHtml(adapter.baseUrl);
+      if (html) {
+        const schedules = await adapter.getSchedule(html);
+        for (const item of schedules) {
+          try {
+            await upsertSchedule(item);
+          } catch (err) {
+            console.error(`[SCRAPER] Failed schedule ${item.animeSlug}:`, err);
+          }
+        }
+        logger.log("SCRAPER", `Synced ${schedules.length} schedule entries.`);
+      } else {
+        logger.error("SCRAPER", "Failed to fetch homepage for schedule.");
+      }
     }
 
-    logger.log("SCRAPER", "Semua task scraper selesai successfully.");
+    logger.log("SCRAPER", "All tasks completed successfully.");
   } catch (error) {
     const errMessage = error instanceof Error ? error.message : String(error);
-    logger.error("SCRAPER", `Terjadi error saat menjalankan scraper: ${errMessage}`);
+    logger.error("SCRAPER", `Error running scraper: ${errMessage}`);
   } finally {
     await prisma.$disconnect();
   }

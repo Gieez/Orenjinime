@@ -1,10 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import VideoPlayer from "@/components/VideoPlayer";
-import { getFullEpisodeWithFallback } from "@/services/stream-service";
 import Link from "next/link";
 
-// Sesuaikan dengan parameter Next.js 15+ (Promise)
 export default async function WatchPage({
   params,
 }: {
@@ -12,11 +10,11 @@ export default async function WatchPage({
 }) {
   const { anime: slug, episode: epParam } = await params;
   const episodeNumber = parseInt(epParam, 10);
-  
+
   if (isNaN(episodeNumber)) return notFound();
 
-  // 1. Ambil data episode BESERTA list semua episode untuk navigasi Next/Prev
-  let episode = await prisma.episode.findFirst({
+  // DB-only — no live scraping. Data is pre-populated by cron job.
+  const episode = await prisma.episode.findFirst({
     where: {
       episodeNumber: episodeNumber,
       anime: { slug: slug },
@@ -25,7 +23,7 @@ export default async function WatchPage({
       anime: {
         include: {
           episodes: {
-            orderBy: { episodeNumber: "asc" }, // Urutkan episode dari awal ke akhir
+            orderBy: { episodeNumber: "asc" },
           },
         },
       },
@@ -35,43 +33,13 @@ export default async function WatchPage({
 
   if (!episode) return notFound();
 
-  // 2. Trigger Scraping otomatis jika stream kosong
-if (episode.streamSources.length === 0 && episode.sourceUrl) {
-    try {
-      console.log(`[Scraping Trigger] Mengambil stream ep dari: ${episode.sourceUrl}`);
-      // Panggil fungsi scraper lu dengan sourceUrl
-      await getFullEpisodeWithFallback(episode.id, episode.sourceUrl);
-
-      // Refresh data setelah scraping sukses
-      episode = await prisma.episode.findUnique({
-        where: { id: episode.id },
-        include: {
-          anime: {
-            include: {
-              episodes: {
-                orderBy: { episodeNumber: "asc" },
-              },
-            },
-          },
-          streamSources: true,
-        },
-      });
-    } catch (e) {
-      console.error("[Scraping Error]", e);
-    }
-  }
-
-  if (!episode) return notFound();
-
-  // Siapkan data untuk tombol navigasi
+  // Navigation helpers
   const allEpisodes = episode.anime.episodes || [];
   const prevEpisode = allEpisodes.find((e) => e.episodeNumber === episodeNumber - 1);
   const nextEpisode = allEpisodes.find((e) => e.episodeNumber === episodeNumber + 1);
 
   return (
-    // PERBAIKAN LAYOUT: pt-24 ditambahkan agar konten tidak tertutup Navbar!
     <main className="mx-auto max-w-5xl px-4 pt-24 pb-12">
-      
       {/* Breadcrumb */}
       <div className="mb-4 flex items-center gap-2 text-sm text-neutral-400">
         <Link href="/" className="hover:text-brand transition">Home</Link>
@@ -92,14 +60,21 @@ if (episode.streamSources.length === 0 && episode.sourceUrl) {
 
       {/* Video Player */}
       <div className="rounded-xl overflow-hidden border border-neutral-800 bg-neutral-900 shadow-xl">
-        <VideoPlayer 
-          servers={episode.streamSources || []} 
+        <VideoPlayer
+          servers={episode.streamSources || []}
           animeSlug={episode.anime.slug}
           episodeNumber={episode.episodeNumber}
           introStart={null}
           introEnd={null}
         />
       </div>
+
+      {/* Stream sources empty warning */}
+      {(!episode.streamSources || episode.streamSources.length === 0) && (
+        <div className="mt-4 rounded-xl border border-yellow-800 bg-yellow-900/20 p-4 text-sm text-yellow-300">
+          Sumber streaming belum tersedia untuk episode ini. Data akan diperbarui oleh sistem sinkronisasi otomatis.
+        </div>
+      )}
 
       {/* NAVIGASI TOMBOL PREV / NEXT */}
       <div className="mt-6 flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900 p-4 text-sm font-semibold shadow-md">
@@ -163,7 +138,6 @@ if (episode.streamSources.length === 0 && episode.sourceUrl) {
           {episode.anime.synopsis || "Sinopsis belum tersedia."}
         </p>
       </div>
-      
     </main>
   );
 }

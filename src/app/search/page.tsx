@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useState, Suspense, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { AnimeCard, AnimeCardSkeleton, AnimeCardData } from "@/components/AnimeCard";
 
-// Tambahkan isLocal (jika belum ada di tipe aslinya)
 interface ExtendedAnimeCardData extends AnimeCardData {
   isLocal?: boolean;
 }
@@ -17,38 +16,49 @@ function SearchContent() {
   const [query, setQuery] = useState(initialQ);
   const [results, setResults] = useState<ExtendedAnimeCardData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(!!initialQ);
 
-  useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
+  // Search only on Enter key or submit button — NOT on every keystroke
+  const doSearch = useCallback(
+    async (searchQuery: string) => {
+      if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+        setResults([]);
+        setHasSearched(false);
+        return;
+      }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(async () => {
       setLoading(true);
+      setHasSearched(true);
+
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
-          signal: controller.signal,
-        });
+        const res = await fetch(
+          `/api/search?q=${encodeURIComponent(searchQuery.trim())}`
+        );
         const json = await res.json();
         setResults(json.data ?? []);
       } catch {
-        // ignore aborted request
+        setResults([]);
       } finally {
         setLoading(false);
       }
-    }, 400); // debounce
-
-    return () => {
-      clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [query]);
+    },
+    []
+  );
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    router.replace(`/search?q=${encodeURIComponent(query)}`);
+    // Update URL for shareability
+    router.replace(`/search?q=${encodeURIComponent(query.trim())}`);
+    // Fire the search
+    doSearch(query);
+  }
+
+  // Allow Enter key to trigger search (input already handles this via form submit)
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSubmit(e as any);
+    }
   }
 
   return (
@@ -58,15 +68,23 @@ function SearchContent() {
       <form onSubmit={handleSubmit} className="mb-8">
         <div className="relative">
           <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500">
-            🔍
+            &#128269;
           </span>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cari judul anime..."
+            onKeyDown={handleKeyDown}
+            placeholder="Ketik judul anime, lalu Enter..."
             autoFocus
-            className="w-full rounded-xl border border-neutral-800 bg-neutral-900 py-4 pl-11 pr-4 text-sm text-white outline-none ring-0 transition placeholder:text-neutral-500 focus:border-brand"
+            className="w-full rounded-xl border border-neutral-800 bg-neutral-900 py-4 pl-11 pr-24 text-sm text-white outline-none ring-0 transition placeholder:text-neutral-500 focus:border-brand"
           />
+          <button
+            type="submit"
+            disabled={!query.trim() || query.trim().length < 2}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white transition hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Cari
+          </button>
         </div>
       </form>
 
@@ -78,7 +96,7 @@ function SearchContent() {
         </div>
       )}
 
-      {!loading && results.length === 0 && query.trim() && (
+      {!loading && hasSearched && results.length === 0 && query.trim() && (
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-8 text-center text-sm text-neutral-400">
           Tidak ada hasil untuk &quot;{query}&quot;.
         </div>
@@ -89,15 +107,14 @@ function SearchContent() {
           {results.map((a) => (
             <div key={a.slug} className="relative group">
               <AnimeCard anime={a} />
-              
-              {/* BINTANG UTAMA: Label LIVE untuk anime yang belum ada di DB */}
-              {a.isLocal === false && (
-                <span className="absolute top-2 right-2 z-10 rounded bg-blue-600 px-2 py-1 text-[10px] font-bold text-white shadow-lg">
-                  LIVE
-                </span>
-              )}
             </div>
           ))}
+        </div>
+      )}
+
+      {!hasSearched && !loading && (
+        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-8 text-center text-sm text-neutral-500">
+          Ketik judul anime yang ingin dicari, lalu tekan Enter atau klik tombol Cari.
         </div>
       )}
     </div>

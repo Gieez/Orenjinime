@@ -172,6 +172,15 @@ function parseRelativeDate(text: string, now = new Date()): Date | null {
   return ms > 0 ? new Date(now.getTime() - ms) : null;
 }
 
+function cleanSynopsis(text?: string | null): string | undefined {
+  if (!text) return undefined;
+  return text
+    .replace(/\bsamehadaku\b/gi, "OrenGiNime")
+    .replace(/\bsamehadaku\.how\b/gi, "OrenGiNime")
+    .replace(/\bv2\.samehadaku\.how\b/gi, "OrenGiNime")
+    .trim() || undefined;
+}
+
 function parseEpisodeNumber(text: string, href?: string): number | undefined {
   const explicit = text.match(/(?:episode|eps|ep)\s*(\d+(?:\.\d+)?)/i);
   if (explicit) return Number(explicit[1]);
@@ -362,7 +371,7 @@ export class NugiAnimeAdapter implements SourceAdapter {
         $(".infoanime .thumb img, .poster img").first().attr("data-src")
     );
 
-    const synopsis = clean(
+    const synopsis = cleanSynopsis(
       $(".entry-content-single[itemprop='description'], .infoanime .desc, .synopsis").first().text()
     );
 

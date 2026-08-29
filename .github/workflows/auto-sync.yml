@@ -2,12 +2,20 @@ name: Auto Sync Anime
 
 on:
   schedule:
+    # Every 3 hours — frequent enough to catch new episodes
     - cron: "0 */3 * * *"
   workflow_dispatch:
+    inputs:
+      full_sync:
+        description: "Run full sync (all pages)"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout Repository
@@ -22,14 +30,19 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      # TAMBAHKAN LANGKAH INI: Biar Prisma Client ter-generate
       - name: Generate Prisma Client
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npx prisma generate
 
-      - name: Run Sync Script
+      - name: Run Sync Script (Catalog)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        # Tambahkan --esm kalau project lu pakai ES Module
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
         run: npx tsx scripts/sync.ts
+
+      - name: Run Schedule Sync
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: npx tsx src/scraper/index.ts --job=schedule

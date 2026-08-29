@@ -16,8 +16,8 @@
     "scrape:catalog": "tsx src/scraper/index.ts --job=catalog",
     "scrape:schedule": "tsx src/scraper/index.ts --job=schedule",
     "scrape:news": "tsx src/scraper/index.ts --job=news",
-    "scheduler": "tsx src/scheduler/index.ts",
-    "seed": "tsx src/scheduler/seed.ts"
+    "seed": "tsx src/scheduler/seed.ts",
+    "sync": "tsx scripts/sync.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
@@ -25,13 +25,9 @@
     "cheerio": "^1.0.0",
     "dotenv": "^17.4.2",
     "got-scraping": "^4.2.1",
-    "hls.js": "^1.5.15",
     "next": "^14.2.13",
-    "p-limit": "^5.0.0",
-    "playwright": "^1.62.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "rss-parser": "^3.13.0",
     "server-only": "^0.0.1",
     "zod": "^3.23.8"
   },

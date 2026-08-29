@@ -1,46 +1,62 @@
 import { NextResponse } from "next/server";
-import { chromium } from "playwright";
+import { prisma } from "@/lib/prisma";
 
-// Objek untuk menyimpan cache di memori server
-const cache: Record<string, { data: any; timestamp: number }> = {};
-const CACHE_DURATION = 1000 * 60 * 30; // Cache berlaku 30 menit
+const DAY_MAP: Record<string, number> = {
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+  sunday: 0,
+};
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const day = searchParams.get("day") || "monday";
-  const now = Date.now();
 
-  // 1. Cek apakah cache tersedia dan belum kadaluarsa
-  if (cache[day] && now - cache[day].timestamp < CACHE_DURATION) {
-    console.log(`[CACHE HIT] Menggunakan data cache untuk: ${day}`);
-    return NextResponse.json(cache[day].data);
-  }
-
-  // 2. Jika tidak ada cache, jalankan Playwright
-  console.log(`[CACHE MISS] Fetching data baru untuk: ${day}`);
-  let browser;
   try {
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    const dayOfWeek = DAY_MAP[day];
+
+    if (dayOfWeek === undefined) {
+      return NextResponse.json(
+        { error: "Invalid day parameter" },
+        { status: 400 }
+      );
+    }
+
+    // Read schedule from DB — populated by cron job
+    const schedules = await prisma.schedule.findMany({
+      where: { dayOfWeek },
+      include: {
+        anime: {
+          select: {
+            title: true,
+            slug: true,
+            poster: true,
+            type: true,
+            rating: true,
+          },
+        },
+      },
     });
-    const page = await context.newPage();
 
-    await page.goto("https://v2.samehadaku.how/", { waitUntil: "domcontentloaded", timeout: 30000 });
+    const result = schedules.map((s) => ({
+      title: s.anime.title,
+      url: `/anime/${s.anime.slug}`,
+      featured_img_src: s.anime.poster,
+      east_type: s.anime.type,
+      east_score: s.anime.rating?.toFixed(1) || "N/A",
+      genre: "",
+      east_time: s.airTime,
+    }));
 
-    const apiResponse = await page.evaluate(async (targetDay) => {
-      const res = await fetch(`https://v2.samehadaku.how/wp-json/custom/v1/all-schedule?perpage=20&day=${targetDay}`);
-      return await res.json();
-    }, day);
-
-    await browser.close();
-
-    // 3. Simpan ke cache
-    cache[day] = { data: apiResponse, timestamp: now };
-
-    return NextResponse.json(apiResponse);
+    return NextResponse.json(result);
   } catch (error: any) {
-    if (browser) await browser.close();
-    return NextResponse.json({ error: "Gagal memuat data", details: error.message }, { status: 500 });
+    console.error("[Schedule API Error]:", error);
+    return NextResponse.json(
+      { error: "Gagal memuat data", details: error.message },
+      { status: 500 }
+    );
   }
 }
