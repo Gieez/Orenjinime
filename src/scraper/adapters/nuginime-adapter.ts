@@ -215,13 +215,12 @@ export class NugiAnimeAdapter implements SourceAdapter {
   }
 
   public parseHomepage(html: string): CatalogItem[] {
-    // Karena logikanya mirip dengan scrapeCatalog, kita bisa panggil atau sesuaikan langsung
     const $ = cheerio.load(html);
     const items: CatalogItem[] = [];
 
     const $cards = $(".justpost .post-show ul li, .post-show ul li").not(".widget_senishi_topten li");
 
-    $cards.each((_, el) => {
+    $cards.each((i, el) => {
       const $el = $(el);
       const title = clean($el.find("h2.entry-title a, .title a, .entry-title").first().text()) || "";
       const url = $el.find("h2.entry-title a, .thumb a, a").first().attr("href") || "";
@@ -248,6 +247,7 @@ export class NugiAnimeAdapter implements SourceAdapter {
           status: parseStatus(episodeNum),
           type: AnimeType.TV,
           rating: null,
+          latestOrder: i + 1,  // <-- ADD: urutan di homepage (1 = hero, 2 = latest ep 2, dst)
         });
       }
     });

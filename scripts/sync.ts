@@ -34,9 +34,10 @@ async function runSync() {
           const episodeList = adapter.parseEpisodeList(detailHtml);
 
           const saved = await upsertAnime({
-            ...detailData,
-            slug: item.slug,
-          });
+                      ...detailData,
+                      slug: item.slug,
+                      latestOrder: item.latestOrder,
+                    });
 
           if (episodeList.length > 0) {
             await upsertEpisodes(saved.id, episodeList);
