@@ -23,10 +23,10 @@ export async function autoScrapeAnimeIfNeeded(slug: string): Promise<boolean> {
   // Kalau sourceUrl kosong, ga bisa scrape
   if (!anime.sourceUrl) return false;
 
-  // Cooldown: kalau udah pernah scrape kurang dari 1 jam lalu, jangan retry
+  // Cooldown: kalau udah pernah scrape kurang dari 5 menit lalu, jangan retry
   if (anime.lastScrapedAt) {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    if (anime.lastScrapedAt > oneHourAgo) return false;
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    if (anime.lastScrapedAt > fiveMinutesAgo) return false;
   }
 
   console.log(`[AutoScrape] Episode kosong untuk "${slug}", scraping...`);

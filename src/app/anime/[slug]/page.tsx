@@ -1,4 +1,4 @@
-export const revalidate = 3600; // ISR: cache 1 jam, auto-scrape jalan saat rebuild
+export const dynamic = "force-dynamic"; // Dynamic: auto-scrape butuh fresh render, ga cache
 
 import { notFound } from "next/navigation";
 import Link from "next/link";

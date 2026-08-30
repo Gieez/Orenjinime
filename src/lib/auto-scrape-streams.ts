@@ -20,8 +20,11 @@ export async function autoScrapeStreamsIfNeeded(episodeId: string): Promise<bool
   // Kalau stream udah ada, ga perlu scrape
   if (episode.streamSources.length > 0) return true;
 
-  // Kalau udah pernah di-scrape tapi tetap kosong → jangan retry
-  if (episode.lastScrapedAt) return false;
+  // Cooldown: kalau udah pernah scrape kurang dari 5 menit lalu, jangan retry
+  if (episode.lastScrapedAt) {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    if (episode.lastScrapedAt > fiveMinutesAgo) return false;
+  }
 
   // Kalau ga ada sourceUrl, ga bisa scrape
   if (!episode.sourceUrl) return false;

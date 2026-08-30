@@ -1,4 +1,4 @@
-export const revalidate = 3600; // ISR: cache 1 jam
+export const dynamic = "force-dynamic"; // Dynamic: auto-scrape butuh fresh render, ga cache
 
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
