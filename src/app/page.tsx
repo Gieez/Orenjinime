@@ -3,8 +3,8 @@ import Link from "next/link";
 import { formatRating } from "@/lib/format";
 import { ContinueWatching } from "@/components/ContinueWatching";
 
-// Set revalidate misal tiap 1 jam, atau biarkan dinamis tanpa sync berat di awal
-export const revalidate = 3600; 
+// Force-dynamic: selalu baca DB terbaru, ga cache
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   // 🚀 AMBIL DATA LANGSUNG DARI DATABASE LOKAL (SUPER CEPAT < 0.1 DETIK)
