@@ -166,6 +166,67 @@ async function runSync() {
           console.error("[Sync] Schedule sync failed:", err);
         }
 
+    // PHASE 4: Scrape episodes untuk anime yang belum punya episode
+    console.log("[Sync] Phase 4: Scraping episodes untuk anime tanpa episode...");
+    try {
+      const animeWithoutEpisodes = await prisma.anime.findMany({
+        where: {
+          sourceUrl: { not: null },
+          episodes: { none: {} },
+        },
+        select: {
+          id: true,
+          slug: true,
+          title: true,
+          sourceUrl: true,
+          lastScrapedAt: true,
+        },
+        take: 200, // Batasi per run biar ga timeout
+      });
+
+      console.log(`[Sync] Ditemukan ${animeWithoutEpisodes.length} anime tanpa episode.`);
+
+      let episodeCount = 0;
+      for (const anime of animeWithoutEpisodes) {
+        // Skip kalau baru di-scrape < 1 jam lalu
+        if (anime.lastScrapedAt) {
+          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+          if (anime.lastScrapedAt > oneHourAgo) continue;
+        }
+
+        console.log(`[Sync] Scraping episodes: ${anime.title} (${anime.slug})`);
+
+        try {
+          const detailHtml = await HttpClient.getHtml(anime.sourceUrl!);
+          if (detailHtml) {
+            const episodeList = adapter.parseEpisodeList(detailHtml, anime.slug);
+
+            if (episodeList.length > 0) {
+              await upsertEpisodes(anime.id, episodeList);
+              console.log(`[Sync] OK ${anime.title}: ${episodeList.length} episodes.`);
+              episodeCount++;
+            }
+          }
+        } catch (err) {
+          console.error(`[Sync] Failed episodes ${anime.slug}:`, err);
+        }
+
+        // Update lastScrapedAt supaya ga scrape lagi terlalu sering
+        try {
+          await prisma.anime.update({
+            where: { id: anime.id },
+            data: { lastScrapedAt: new Date() },
+          });
+        } catch {}
+
+        await sleep(2000); // Rate limit
+      }
+
+      console.log(`[Sync] Phase 4 selesai: ${episodeCount} anime mendapat episode.`);
+    } catch (err) {
+      console.error("[Sync] Phase 4 failed:", err);
+    }
+
     console.log(`[Sync] Complete. Processed ${processed} anime.`);
   } catch (error) {
     console.error("[Sync] Fatal error:", error);

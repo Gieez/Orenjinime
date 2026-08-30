@@ -1,11 +1,9 @@
-export const dynamic = "force-dynamic"; // Dynamic: auto-scrape butuh fresh render, ga cache
+export const dynamic = "force-dynamic"; // DB-only, cepat
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { EpisodeList } from "@/components/EpisodeList";
-import { autoScrapeAnimeIfNeeded } from "@/lib/auto-scrape";
-import { scrapeAndSaveAnime } from "@/lib/scrape-and-save";
 
 interface PageProps {
   params: Promise<{ slug: string }> | { slug: string };
@@ -21,22 +19,6 @@ async function getAnimeFromDb(slug: string) {
         genres: { include: { genre: true } },
       },
     });
-
-    // Kalau anime ada tapi episode kosong → auto-scrape
-    if (anime && anime.episodes.length === 0 && anime.sourceUrl) {
-      await autoScrapeAnimeIfNeeded(slug);
-
-      // Reload dari DB setelah scrape
-      const updated = await prisma.anime.findUnique({
-        where: { slug },
-        include: {
-          episodes: { orderBy: { episodeNumber: "asc" } },
-          genres: { include: { genre: true } },
-        },
-      });
-      return updated;
-    }
-
     return anime;
   } catch (error) {
     console.error(`[DATABASE ERROR] Gagal mengambil anime ${slug}:`, error);
@@ -46,20 +28,11 @@ async function getAnimeFromDb(slug: string) {
 
 export default async function AnimeDetailPage({ params, searchParams }: PageProps) {
   const resolvedParams = await params;
-  const resolvedSearchParams = await searchParams;
   const slug = resolvedParams?.slug;
-  const sourceUrl = resolvedSearchParams?.sourceUrl;
 
   if (!slug) notFound();
 
-  let anime = await getAnimeFromDb(slug);
-
-  // Kalau anime belum ada di DB + ada sourceUrl dari live search → scrape & save
-  if (!anime && sourceUrl) {
-    console.log(`[AnimeDetail] "${slug}" belum ada di DB, scrape dari sourceUrl...`);
-    await scrapeAndSaveAnime(slug, sourceUrl);
-    anime = await getAnimeFromDb(slug);
-  }
+  const anime = await getAnimeFromDb(slug);
 
   if (!anime) notFound();
 
@@ -175,11 +148,17 @@ export default async function AnimeDetailPage({ params, searchParams }: PageProp
           )}
         </h2>
 
-        <EpisodeList
-          episodes={anime.episodes}
-          animeSlug={anime.slug}
-          defaultVisible={24}
-        />
+        {anime.episodes.length === 0 ? (
+          <div className="text-center py-8 text-zinc-500 text-sm">
+            Episode belum tersedia. Episode akan di-update otomatis oleh sistem.
+          </div>
+        ) : (
+          <EpisodeList
+            episodes={anime.episodes}
+            animeSlug={anime.slug}
+            defaultVisible={24}
+          />
+        )}
       </section>
     </main>
   );

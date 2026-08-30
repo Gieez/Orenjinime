@@ -1,4 +1,4 @@
-export const dynamic = "force-dynamic"; // Dynamic: auto-scrape butuh fresh render, ga cache
+export const dynamic = "force-dynamic"; // DB-only, cepat
 
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
@@ -6,8 +6,6 @@ import VideoPlayer from "@/components/VideoPlayer";
 import Link from "next/link";
 import { SaveWatchHistory } from "@/components/SaveWatchHistory";
 import { AdBanner } from "@/components/AdBanner";
-import { autoScrapeStreamsIfNeeded } from "@/lib/auto-scrape-streams";
-import { autoScrapeAnimeIfNeeded } from "@/lib/auto-scrape";
 
 export default async function WatchPage({
   params,
@@ -19,7 +17,7 @@ export default async function WatchPage({
 
   if (isNaN(episodeNumber)) return notFound();
 
-  let episode = await prisma.episode.findFirst({
+  const episode = await prisma.episode.findFirst({
     where: {
       episodeNumber: episodeNumber,
       anime: { slug: slug },
@@ -36,61 +34,14 @@ export default async function WatchPage({
     },
   });
 
-  // Kalau episode belum ada di DB → auto-scrape anime + episodes dulu
-  if (!episode) {
-    const animeExists = await prisma.anime.findUnique({ where: { slug } });
-    if (animeExists) {
-      await autoScrapeAnimeIfNeeded(slug);
-
-      // Coba ambil episode lagi
-      episode = await prisma.episode.findFirst({
-        where: {
-          episodeNumber: episodeNumber,
-          anime: { slug: slug },
-        },
-        include: {
-          anime: {
-            include: {
-              episodes: { orderBy: { episodeNumber: "asc" } },
-            },
-          },
-          streamSources: true,
-        },
-      });
-    }
-  }
-
   if (!episode) return notFound();
-
-  // Kalau stream kosong + belum pernah di-scrape → scrape SEKALI
-  let streamsEmpty = !episode.streamSources || episode.streamSources.length === 0;
-  if (streamsEmpty && !episode.lastScrapedAt) {
-    await autoScrapeStreamsIfNeeded(episode.id);
-
-    // Reload episode dari DB
-    const refreshed = await prisma.episode.findFirst({
-      where: { id: episode.id },
-      include: {
-        anime: {
-          include: {
-            episodes: { orderBy: { episodeNumber: "asc" } },
-          },
-        },
-        streamSources: true,
-      },
-    });
-
-    if (refreshed) {
-      streamsEmpty = refreshed.streamSources.length === 0;
-      // Use refreshed data for rendering
-      Object.assign(episode, refreshed);
-    }
-  }
 
   // Navigation helpers
   const allEpisodes = episode.anime.episodes || [];
   const prevEpisode = allEpisodes.find((e) => e.episodeNumber === episodeNumber - 1);
   const nextEpisode = allEpisodes.find((e) => e.episodeNumber === episodeNumber + 1);
+
+  const streamsEmpty = !episode.streamSources || episode.streamSources.length === 0;
 
   return (
     <main className="mx-auto max-w-5xl px-4 pt-24 pb-12">
@@ -134,7 +85,7 @@ export default async function WatchPage({
       {/* Stream sources empty warning */}
       {streamsEmpty && (
         <div className="mt-4 rounded-xl border border-yellow-800 bg-yellow-900/20 p-4 text-sm text-yellow-300">
-          Sumber video (Server) tidak tersedia atau kosong.
+          Sumber video (Server) belum tersedia. Akan diupdate otomatis oleh sistem.
         </div>
       )}
 
@@ -161,7 +112,9 @@ export default async function WatchPage({
         {nextEpisode ? (
           <Link
             href={`/watch/${slug}/${nextEpisode.episodeNumber}`}
-            className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-white shadow-lg shadow-brand/20 transition hover:bg-brand-dark"
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 transition-all ${
+              "bg-brand text-white shadow-lg shadow-brand/20"
+            }`}
           >
             Next <span className="hidden sm:inline">Episode</span> →
           </Link>

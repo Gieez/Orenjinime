@@ -2,8 +2,8 @@ name: Auto Sync Anime
 
 on:
   schedule:
-    # Every 3 hours — frequent enough to catch new episodes
-    - cron: "0 */3 * * *"
+    # Every 6 hours — balance freshness vs cost
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       full_sync:
