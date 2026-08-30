@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense, useCallback } from "react";
+import { useState, useEffect, Suspense, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { AnimeCard, AnimeCardSkeleton, AnimeCardData } from "@/components/AnimeCard";
 
@@ -42,8 +42,16 @@ function SearchContent() {
         setLoading(false);
       }
     },
-    []
+    [],
   );
+
+  // Auto-search dari URL param ?q= (pas refresh / share link)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (initialQ && initialQ.trim().length >= 2) {
+      doSearch(initialQ);
+    }
+  }, []);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -108,11 +116,7 @@ function SearchContent() {
             <div key={a.slug} className="relative group">
               <AnimeCard
                 anime={a}
-                href={
-                  (a as any).isLive && (a as any).sourceUrl
-                    ? `/anime/${a.slug}?sourceUrl=${encodeURIComponent((a as any).sourceUrl)}`
-                    : `/anime/${a.slug}`
-                }
+                href={`/anime/${a.slug}`}
               />
             </div>
           ))}
