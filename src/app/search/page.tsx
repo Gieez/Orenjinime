@@ -6,6 +6,8 @@ import { AnimeCard, AnimeCardSkeleton, AnimeCardData } from "@/components/AnimeC
 
 interface ExtendedAnimeCardData extends AnimeCardData {
   isLocal?: boolean;
+  isLive?: boolean;
+  sourceUrl?: string;
 }
 
 function SearchContent() {
@@ -69,6 +71,15 @@ function SearchContent() {
     }
   }
 
+  // Handle click pada live result: set cookie dulu, lalu navigate
+  function handleLiveResultClick(e: React.MouseEvent, anime: ExtendedAnimeCardData) {
+    if (anime.isLive && anime.sourceUrl) {
+      // Set cookie 5 menit — cukup buat server component baca
+      document.cookie = `sourceUrl:${anime.slug}=${encodeURIComponent(anime.sourceUrl)}; path=/anime/${anime.slug}; max-age=300; SameSite=Lax`;
+    }
+    // Navigate handled by <Link> — cookie sudah ter-set sebelum browser navigate
+  }
+
   return (
     <div>
       <h1 className="mb-5 text-2xl font-bold text-white">Cari Anime</h1>
@@ -116,11 +127,8 @@ function SearchContent() {
             <div key={a.slug} className="relative group">
               <AnimeCard
                 anime={a}
-                href={
-                  (a as any).isLive && (a as any).sourceUrl
-                    ? `/anime/${a.slug}?sourceUrl=${encodeURIComponent((a as any).sourceUrl)}`
-                    : `/anime/${a.slug}`
-                }
+                href={`/anime/${a.slug}`}
+                onClick={a.isLive ? (e) => handleLiveResultClick(e, a) : undefined}
               />
             </div>
           ))}

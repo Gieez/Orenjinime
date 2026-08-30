@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { EpisodeList } from "@/components/EpisodeList";
@@ -14,7 +15,6 @@ const adapter = new NugiAnimeAdapter();
 
 interface PageProps {
   params: Promise<{ slug: string }> | { slug: string };
-  searchParams: Promise<{ sourceUrl?: string }> | { sourceUrl?: string };
 }
 
 async function getAnimeFromDb(slug: string) {
@@ -79,21 +79,27 @@ async function scrapeAndSaveAnime(slug: string, sourceUrl: string) {
   }
 }
 
-export default async function AnimeDetailPage({ params, searchParams }: PageProps) {
+export default async function AnimeDetailPage({ params }: PageProps) {
   const resolvedParams = await params;
-  const resolvedSearchParams = await searchParams;
   const slug = resolvedParams?.slug;
-  const sourceUrl = resolvedSearchParams?.sourceUrl;
 
   if (!slug) notFound();
 
   // 1) Coba ambil dari DB
   let anime = await getAnimeFromDb(slug);
 
-  // 2) Kalau belum ada di DB + ada sourceUrl → scrape on-demand, lalu ambil dari DB
-  if (!anime && sourceUrl) {
-    await scrapeAndSaveAnime(slug, sourceUrl);
-    anime = await getAnimeFromDb(slug);
+  // 2) Kalau belum ada di DB, coba baca sourceUrl dari cookie (set oleh search page)
+  if (!anime) {
+    const cookieStore = await cookies();
+    const sourceUrl = cookieStore.get(`sourceUrl:${slug}`)?.value;
+
+    if (sourceUrl) {
+      // Hapus cookie setelah dibaca (one-time use)
+      cookieStore.set(`sourceUrl:${slug}`, "", { maxAge: 0, path: `/anime/${slug}` });
+
+      await scrapeAndSaveAnime(slug, sourceUrl);
+      anime = await getAnimeFromDb(slug);
+    }
   }
 
   // 3) Masih ga ada → 404

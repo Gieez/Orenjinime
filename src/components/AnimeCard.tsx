@@ -24,9 +24,10 @@ interface AnimeCardProps {
   anime: AnimeCardData;
   priority?: boolean;
   href?: string;
+  onClick?: (e: React.MouseEvent) => void;
 }
 
-export function AnimeCard({ anime, priority = false, href }: AnimeCardProps) {
+export function AnimeCard({ anime, priority = false, href, onClick }: AnimeCardProps) {
   const [imgError, setImgError] = useState(false);
   const cleanPoster = getCleanImageUrl(anime.poster);
 
@@ -43,6 +44,7 @@ export function AnimeCard({ anime, priority = false, href }: AnimeCardProps) {
   return (
     <Link
       href={linkHref}
+      onClick={onClick}
       className="group block overflow-hidden rounded-xl bg-neutral-900 ring-1 ring-neutral-800/80 transition duration-200 hover:-translate-y-1 hover:ring-brand/60 hover:shadow-lg hover:shadow-black/40"
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden bg-neutral-800">
