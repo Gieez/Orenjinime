@@ -116,7 +116,11 @@ function SearchContent() {
             <div key={a.slug} className="relative group">
               <AnimeCard
                 anime={a}
-                href={`/anime/${a.slug}`}
+                href={
+                  (a as any).isLive && (a as any).sourceUrl
+                    ? `/anime/${a.slug}?sourceUrl=${encodeURIComponent((a as any).sourceUrl)}`
+                    : `/anime/${a.slug}`
+                }
               />
             </div>
           ))}

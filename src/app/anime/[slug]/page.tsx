@@ -1,9 +1,16 @@
-export const dynamic = "force-dynamic"; // DB-only, cepat
+export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { EpisodeList } from "@/components/EpisodeList";
+import { NugiAnimeAdapter } from "@/scraper/adapters/nuginime-adapter";
+import { upsertAnime, upsertEpisodes } from "@/scraper/persist/upsert";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
+const adapter = new NugiAnimeAdapter();
 
 interface PageProps {
   params: Promise<{ slug: string }> | { slug: string };
@@ -26,14 +33,70 @@ async function getAnimeFromDb(slug: string) {
   }
 }
 
+/**
+ * Scrape anime detail dari Samehadaku via curl, simpan ke DB.
+ * Dipanggil saat anime belum ada di DB (live search result dari user).
+ */
+async function scrapeAndSaveAnime(slug: string, sourceUrl: string) {
+  console.log(`[SCRAPE-ON-DEMAND] Scraping ${slug} dari ${sourceUrl}`);
+
+  try {
+    const { stdout } = await execAsync(
+      `curl -s -L --max-time 20 ` +
+        `-H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" ` +
+        `-H "Accept-Language: id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7" ` +
+        `-H "Referer: https://v2.samehadaku.how/" ` +
+        `"${sourceUrl}"`,
+      { maxBuffer: 10 * 1024 * 1024 }
+    );
+
+    if (!stdout || stdout.length < 500) {
+      console.log(`[SCRAPE-ON-DEMAND] Response kosong/pendek untuk ${slug}`);
+      return null;
+    }
+
+    // Parse detail + episodes
+    const detailData = adapter.parseAnimeDetail(stdout, sourceUrl);
+    const episodeList = adapter.parseEpisodeList(stdout);
+
+    // Save ke DB
+    const saved = await upsertAnime({
+      ...detailData,
+      slug,
+    });
+
+    if (episodeList.length > 0) {
+      await upsertEpisodes(saved.id, episodeList);
+      console.log(`[SCRAPE-ON-DEMAND] OK ${slug}: ${episodeList.length} episodes saved.`);
+    } else {
+      console.log(`[SCRAPE-ON-DEMAND] OK ${slug}: detail saved, no episodes found.`);
+    }
+
+    return saved;
+  } catch (err: any) {
+    console.error(`[SCRAPE-ON-DEMAND] Gagal scrape ${slug}:`, err?.message);
+    return null;
+  }
+}
+
 export default async function AnimeDetailPage({ params, searchParams }: PageProps) {
   const resolvedParams = await params;
+  const resolvedSearchParams = await searchParams;
   const slug = resolvedParams?.slug;
+  const sourceUrl = resolvedSearchParams?.sourceUrl;
 
   if (!slug) notFound();
 
-  const anime = await getAnimeFromDb(slug);
+  // 1) Coba ambil dari DB
+  let anime = await getAnimeFromDb(slug);
 
+  // 2) Kalau belum ada di DB + ada sourceUrl → scrape on-demand, lalu ambil dari DB
+  if (!anime && sourceUrl) {
+    await scrapeAndSaveAnime(slug, sourceUrl);
+    anime = await getAnimeFromDb(slug);
+  }
+
+  // 3) Masih ga ada → 404
   if (!anime) notFound();
 
   const firstEpisode = anime.episodes[0]?.episodeNumber;
