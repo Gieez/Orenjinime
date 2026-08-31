@@ -64,8 +64,10 @@ async function scrapeAndSaveStreams(
     }
 
     // Scrape streams dari halaman episode
+    const url = ep.sourceUrl;
+    if (!url) continue;
     try {
-      const epHtml = await HttpClient.getHtml(ep.sourceUrl);
+      const epHtml = await HttpClient.getHtml(url);
       if (epHtml) {
         const streams = adapter.parseStreamSources(epHtml);
         if (streams.length > 0) {
