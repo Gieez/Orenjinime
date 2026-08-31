@@ -5,6 +5,66 @@ import { upsertAnime, upsertEpisodes, upsertSchedule } from "../src/scraper/pers
 
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
+/**
+ * Simpan stream sources ke database untuk satu episode.
+ * Delete lama → create baru (clean slate).
+ */
+async function saveStreamSources(
+  episodeId: string,
+  streams: Array<{ name: string; url: string; quality?: string }>
+) {
+  if (streams.length === 0) return;
+  await prisma.streamSource.deleteMany({ where: { episodeId } });
+  await prisma.streamSource.createMany({
+    data: streams.map((s) => ({
+      episodeId,
+      name: s.name,
+      url: s.url,
+      quality: s.quality || "HD",
+    })),
+  });
+}
+
+/**
+ * Scrape halaman episode → ambil stream sources → simpan ke DB.
+ * Hanya proses最多 recentN episode terbaru.
+ */
+async function scrapeAndSaveStreams(
+  animeId: string,
+  episodes: Array<{ episodeNumber: number; sourceUrl?: string }>,
+  adapter: NugiAnimeAdapter,
+  maxEpisodes: number = 3
+) {
+  // Ambil episode terbaru (sort desc, ambil maxEpisodes)
+  const sorted = [...episodes]
+    .sort((a, b) => b.episodeNumber - a.episodeNumber)
+    .slice(0, maxEpisodes);
+
+  for (const ep of sorted) {
+    if (!ep.sourceUrl) continue;
+    try {
+      const epHtml = await HttpClient.getHtml(ep.sourceUrl);
+      if (epHtml) {
+        const streams = adapter.parseStreamSources(epHtml);
+        if (streams.length > 0) {
+          // Cari episode record di DB
+          const epRecord = await prisma.episode.findUnique({
+            where: {
+              animeId_episodeNumber: { animeId, episodeNumber: ep.episodeNumber },
+            },
+          });
+          if (epRecord) {
+            await saveStreamSources(epRecord.id, streams);
+          }
+        }
+      }
+    } catch (err) {
+      // silent — rate limit atau halaman ga bisa diakses
+    }
+    await sleep(1500); // Rate limit untuk stream fetch
+  }
+}
+
 async function runSync() {
   console.log("[Sync] Starting anime & episode synchronization...");
 
@@ -42,6 +102,13 @@ async function runSync() {
           if (episodeList.length > 0) {
             await upsertEpisodes(saved.id, episodeList);
             console.log(`[Sync] OK ${item.title}: ${episodeList.length} episodes.`);
+
+            // Stream sources: scrape 3 episode terbaru
+            try {
+              await scrapeAndSaveStreams(saved.id, episodeList, adapter, 3);
+            } catch (streamErr) {
+              console.error(`[Sync] Failed streams ${item.slug}:`, streamErr);
+            }
           }
           processed++;
         }
@@ -206,6 +273,13 @@ async function runSync() {
               await upsertEpisodes(anime.id, episodeList);
               console.log(`[Sync] OK ${anime.title}: ${episodeList.length} episodes.`);
               episodeCount++;
+
+              // Stream sources: scrape 1 episode terbaru saja (Phase 4 bisa proses banyak anime)
+              try {
+                await scrapeAndSaveStreams(anime.id, episodeList, adapter, 1);
+              } catch (streamErr) {
+                console.error(`[Sync] Failed streams ${anime.slug}:`, streamErr);
+              }
             }
           }
         } catch (err) {
