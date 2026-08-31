@@ -26,43 +26,63 @@ async function saveStreamSources(
 }
 
 /**
- * Scrape halaman episode → ambil stream sources → simpan ke DB.
- * Hanya proses最多 recentN episode terbaru.
+ * Scrape streams untuk SEMUA episode yang belum punya stream source.
+ * Skip episode yang sudah ada stream-nya (ga duplikat/numpuk).
+ * Return: jumlah episode yang berhasil di-scrape.
  */
 async function scrapeAndSaveStreams(
   animeId: string,
   episodes: Array<{ episodeNumber: number; sourceUrl?: string }>,
-  adapter: NugiAnimeAdapter,
-  maxEpisodes: number = 3
-) {
-  // Ambil episode terbaru (sort desc, ambil maxEpisodes)
-  const sorted = [...episodes]
-    .sort((a, b) => b.episodeNumber - a.episodeNumber)
-    .slice(0, maxEpisodes);
+  adapter: NugiAnimeAdapter
+): Promise<number> {
+  // Cari episode IDs yang SUDAH punya stream source → skip
+  const episodesWithStreams = await prisma.streamSource.findMany({
+    where: { episode: { animeId } },
+    select: { episodeId: true },
+    distinct: ["episodeId"],
+  });
+  const skipEpisodeIds = new Set(episodesWithStreams.map((e) => e.episodeId));
 
-  for (const ep of sorted) {
-    if (!ep.sourceUrl) continue;
+  // Filter: hanya episode yang BELUM punya streams dan punya sourceUrl
+  const epsToScrape = episodes
+    .filter((ep) => ep.sourceUrl)
+    .sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+  let scraped = 0;
+  let skipped = 0;
+
+  for (const ep of epsToScrape) {
+    // Cek apakah episode ini sudah punya streams
+    const epRecord = await prisma.episode.findUnique({
+      where: { animeId_episodeNumber: { animeId, episodeNumber: ep.episodeNumber } },
+    });
+    if (!epRecord) continue;
+
+    if (skipEpisodeIds.has(epRecord.id)) {
+      skipped++;
+      continue; // Sudah ada streams → skip
+    }
+
+    // Scrape streams dari halaman episode
     try {
       const epHtml = await HttpClient.getHtml(ep.sourceUrl);
       if (epHtml) {
         const streams = adapter.parseStreamSources(epHtml);
         if (streams.length > 0) {
-          // Cari episode record di DB
-          const epRecord = await prisma.episode.findUnique({
-            where: {
-              animeId_episodeNumber: { animeId, episodeNumber: ep.episodeNumber },
-            },
-          });
-          if (epRecord) {
-            await saveStreamSources(epRecord.id, streams);
-          }
+          await saveStreamSources(epRecord.id, streams);
+          scraped++;
         }
       }
     } catch (err) {
       // silent — rate limit atau halaman ga bisa diakses
     }
-    await sleep(1500); // Rate limit untuk stream fetch
+    await sleep(1000); // Rate limit
   }
+
+  if (skipped > 0 || scraped > 0) {
+    console.log(`[Sync] Streams: ${scraped} scraped, ${skipped} skipped (sudah ada)`);
+  }
+  return scraped;
 }
 
 async function runSync() {
@@ -103,9 +123,9 @@ async function runSync() {
             await upsertEpisodes(saved.id, episodeList);
             console.log(`[Sync] OK ${item.title}: ${episodeList.length} episodes.`);
 
-            // Stream sources: scrape 3 episode terbaru
+            // Stream sources: scrape SEMUA episode yang belum punya streams
             try {
-              await scrapeAndSaveStreams(saved.id, episodeList, adapter, 3);
+              await scrapeAndSaveStreams(saved.id, episodeList, adapter);
             } catch (streamErr) {
               console.error(`[Sync] Failed streams ${item.slug}:`, streamErr);
             }
@@ -275,9 +295,9 @@ async function runSync() {
               console.log(`[Sync] OK ${anime.title}: ${episodeList.length} episodes.`);
               episodeCount++;
 
-              // Stream sources: scrape 1 episode terbaru saja (Phase 4 bisa proses banyak anime)
+              // Stream sources: scrape SEMUA episode yang belum punya streams
               try {
-                await scrapeAndSaveStreams(anime.id, episodeList, adapter, 1);
+                await scrapeAndSaveStreams(anime.id, episodeList, adapter);
               } catch (streamErr) {
                 console.error(`[Sync] Failed streams ${anime.slug}:`, streamErr);
               }
