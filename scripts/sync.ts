@@ -116,8 +116,8 @@ async function runSync() {
         console.error(`[Sync] Failed detail ${item.slug}:`, err);
       }
 
-      // Rate limit: 2s between requests
-      await sleep(2000);
+      // Rate limit: 1s between requests (got-scraping lebih reliable)
+      await sleep(1000);
     }
 
     // PHASE 2: Sync Top 10
@@ -249,17 +249,18 @@ async function runSync() {
           sourceUrl: true,
           lastScrapedAt: true,
         },
-        take: 200, // Batasi per run biar ga timeout
+        orderBy: { createdAt: "asc" as const }, // Proses yang paling lama duluan
+        take: 50, // Batasi per run biar ga timeout (30 min limit)
       });
 
       console.log(`[Sync] Ditemukan ${animeWithoutEpisodes.length} anime tanpa episode.`);
 
       let episodeCount = 0;
       for (const anime of animeWithoutEpisodes) {
-        // Skip kalau baru di-scrape < 1 jam lalu
+        // Skip kalau baru di-scrape < 2 jam lalu
         if (anime.lastScrapedAt) {
-          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-          if (anime.lastScrapedAt > oneHourAgo) continue;
+          const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+          if (anime.lastScrapedAt > twoHoursAgo) continue;
         }
 
         console.log(`[Sync] Scraping episodes: ${anime.title} (${anime.slug})`);
@@ -294,7 +295,7 @@ async function runSync() {
           });
         } catch {}
 
-        await sleep(2000); // Rate limit
+        await sleep(1000); // Rate limit — got-scraping lebih reliable
       }
 
       console.log(`[Sync] Phase 4 selesai: ${episodeCount} anime mendapat episode.`);
