@@ -24,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="icon" href="/Doro-Orenji.png" type="image/png" />
         <link rel="apple-touch-icon" href="/Doro-Orenji.png" />
+        <meta name="google-adsense-account" content="ca-pub-6369400192111860" />
         <Script
           async
           src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
