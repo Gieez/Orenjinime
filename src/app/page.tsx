@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { formatRating } from "@/lib/format";
-import { ContinueWatching } from "@/components/ContinueWatching";
 
 // Force-dynamic: selalu baca DB terbaru, ga cache
 export const dynamic = "force-dynamic";
@@ -108,9 +107,6 @@ export default async function HomePage() {
               </div>
             </section>
           )}
-
-          {/* CONTINUE WATCHING (localStorage-based) */}
-          <ContinueWatching />
 
           {/* TOP 10 ANIME (Horizontal Swipe) */}
           {topAnime.length > 0 && (

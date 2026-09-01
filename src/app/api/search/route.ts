@@ -65,7 +65,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 1) Cari di DB dulu
+    // 1) Cari di DB dulu — optimized query
     const localResults = await prisma.anime.findMany({
       where: {
         OR: [

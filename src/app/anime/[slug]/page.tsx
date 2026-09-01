@@ -68,6 +68,48 @@ async function scrapeAndSaveAnime(slug: string, sourceUrl: string) {
     if (episodeList.length > 0) {
       await upsertEpisodes(saved.id, episodeList);
       console.log(`[SCRAPE-ON-DEMAND] OK ${slug}: ${episodeList.length} episodes saved.`);
+
+      // Scrape streams untuk episode terbaru (max 5) supaya user langsung bisa nonton
+      const latestEps = episodeList
+        .filter((ep) => ep.sourceUrl)
+        .sort((a, b) => b.episodeNumber - a.episodeNumber)
+        .slice(0, 5);
+
+      let streamsScraped = 0;
+      for (const ep of latestEps) {
+        const epRecord = await prisma.episode.findUnique({
+          where: { animeId_episodeNumber: { animeId: saved.id, episodeNumber: ep.episodeNumber } },
+        });
+        if (!epRecord || !ep.sourceUrl) continue;
+
+        try {
+          const epHtml = await execAsync(
+            `curl -s -L --max-time 15 ` +
+              `-H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" ` +
+              `-H "Referer: https://v2.samehadaku.how/" ` +
+              `"${ep.sourceUrl}"`,
+            { maxBuffer: 5 * 1024 * 1024 }
+          );
+          if (epHtml.stdout) {
+            const streams = adapter.parseStreamSources(epHtml.stdout);
+            if (streams.length > 0) {
+              await prisma.streamSource.deleteMany({ where: { episodeId: epRecord.id } });
+              await prisma.streamSource.createMany({
+                data: streams.map((s) => ({
+                  episodeId: epRecord.id,
+                  name: s.name,
+                  url: s.url,
+                  quality: s.quality || "HD",
+                  type: s.type || "embed",
+                })),
+              });
+              streamsScraped += streams.length;
+            }
+          }
+        } catch {}
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      console.log(`[SCRAPE-ON-DEMAND] Streams: ${streamsScraped} sources untuk ${Math.min(latestEps.length, 5)} episode terbaru.`);
     } else {
       console.log(`[SCRAPE-ON-DEMAND] OK ${slug}: detail saved, no episodes found.`);
     }
@@ -94,9 +136,7 @@ export default async function AnimeDetailPage({ params }: PageProps) {
     const sourceUrl = cookieStore.get(`sourceUrl:${slug}`)?.value;
 
     if (sourceUrl) {
-      // Hapus cookie setelah dibaca (one-time use)
-      cookieStore.set(`sourceUrl:${slug}`, "", { maxAge: 0, path: `/anime/${slug}` });
-
+      // Cookie one-time use — just read, don't set (cookies() can't set in server component)
       await scrapeAndSaveAnime(slug, sourceUrl);
       anime = await getAnimeFromDb(slug);
     }

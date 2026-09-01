@@ -58,7 +58,7 @@ export function PWAInstallPrompt() {
       <div className="rounded-xl border border-neutral-700 bg-neutral-900 p-4 shadow-2xl shadow-black/50">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg">
-            <img src="/icon.svg" alt="OrenGiNime" className="h-10 w-10" />
+            <img src="/icon.svg" alt="OrenJiNime" className="h-10 w-10" />
           </div>
           <div className="flex-1">
             <p className="text-sm font-semibold text-white">Install OrenJiNime</p>

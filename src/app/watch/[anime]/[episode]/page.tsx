@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic"; // DB-only, cepat
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import VideoPlayer from "@/components/VideoPlayer";
+import { EpisodeList } from "@/components/EpisodeList";
 import Link from "next/link";
 import { SaveWatchHistory } from "@/components/SaveWatchHistory";
 import { AdBanner } from "@/components/AdBanner";
@@ -123,27 +124,14 @@ export default async function WatchPage({
         )}
       </div>
 
-      {/* GRID DAFTAR SEMUA EPISODE */}
+      {/* DAFTAR EPISODE — Horizontal Scroll */}
       <div className="mt-6 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
         <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-neutral-400">Pilih Episode Lain</h3>
-        <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
-          {allEpisodes.map((ep) => {
-            const isActive = ep.episodeNumber === episodeNumber;
-            return (
-              <Link
-                key={ep.id}
-                href={`/watch/${slug}/${ep.episodeNumber}`}
-                className={`flex items-center justify-center rounded-md p-2 text-sm font-bold transition-all ${
-                  isActive
-                    ? "bg-brand text-white shadow-md ring-2 ring-brand/50"
-                    : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white"
-                }`}
-              >
-                {ep.episodeNumber}
-              </Link>
-            );
-          })}
-        </div>
+        <EpisodeList
+          episodes={allEpisodes}
+          animeSlug={slug}
+          currentEpisode={episodeNumber}
+        />
       </div>
 
       {/* SINOPSIS */}

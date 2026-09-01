@@ -4,6 +4,7 @@ import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { Navbar } from "@/components/Navbar";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
+import { WelcomePopup } from "@/components/WelcomePopup";
 
 const ADSENSE_CLIENT = "ca-pub-6369400192111860";
 
@@ -12,8 +13,8 @@ export const metadata: Metadata = {
   description: "Streaming anime terlengkap subtitle Indonesia. Nonton anime online gratis dengan kualitas terbaik.",
   manifest: "/manifest.json",
   icons: {
-    icon: "/favicon.svg",
-    apple: "/favicon.svg",
+    icon: "/Doro-Orenji.png",
+    apple: "/Doro-Orenji.png",
   },
 };
 
@@ -21,7 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="id" className="dark">
       <head>
-        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/Doro-Orenji.png" type="image/png" />
+        <link rel="apple-touch-icon" href="/Doro-Orenji.png" />
         <Script
           async
           src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
@@ -31,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ServiceWorkerRegister />
+        <WelcomePopup />
         <Navbar />
         <PWAInstallPrompt />
 
