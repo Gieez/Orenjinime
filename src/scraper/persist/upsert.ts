@@ -152,8 +152,13 @@ export async function saveStreams(episodeId: string, streams: StreamItem[]) {
   }
 }
 
+const DAY_INT_MAP: Record<string, number> = {
+  minggu: 0, senin: 1, selasa: 2, rabu: 3, kamis: 4, jumat: 5, jumaat: 5, sabtu: 6,
+};
+
 export async function upsertSchedule(item: ScheduleItem) {
   if (!item.dayOfWeek) return null;
+  const dayInt = typeof item.dayOfWeek === "number" ? item.dayOfWeek : DAY_INT_MAP[item.dayOfWeek.toLowerCase()] ?? 1;
 
   const anime = item.animeSlug
     ? await prisma.anime.findUnique({ where: { slug: item.animeSlug } })
@@ -167,13 +172,13 @@ export async function upsertSchedule(item: ScheduleItem) {
       where: {
         animeId_dayOfWeek: {
           animeId: anime.id,
-          dayOfWeek: item.dayOfWeek,
+          dayOfWeek: dayInt,
         },
       },
       update: { airTime: item.airTime },
       create: {
         animeId: anime.id,
-        dayOfWeek: item.dayOfWeek,
+        dayOfWeek: dayInt,
         airTime: item.airTime,
       },
     });

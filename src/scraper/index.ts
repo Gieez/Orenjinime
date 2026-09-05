@@ -6,6 +6,9 @@ import { upsertSchedule } from "./persist/upsert";
 
 const adapter = new NugiAnimeAdapter();
 
+// Samehadaku uses Indonesian day slugs
+const SCHEDULE_DAYS = ["senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu"];
+
 function parseJobArg(): "catalog" | "schedule" | "news" | "all" {
   const arg = process.argv.find((a) => a.startsWith("--job="));
   const value = arg?.split("=")[1];
@@ -33,19 +36,28 @@ async function main() {
   try {
     if (job === "schedule" || job === "all") {
       logger.log("SCRAPER", "Starting schedule scrape...");
-      const html = await HttpClient.getHtml(adapter.baseUrl);
-      if (html) {
-        const schedules = await adapter.getSchedule(html);
-        for (const item of schedules) {
-          try {
-            await upsertSchedule(item);
-          } catch (err) {
-            console.error(`[SCRAPER] Failed schedule ${item.animeSlug}:`, err);
+
+      // Samehadaku /jadwal/ page renders all 7 days in one response —
+      // single fetch + parser maps .result-schedule blocks to day-of-week
+      // by index. No need to loop per day.
+      try {
+        const url = adapter.scheduleUrl("all");
+        const html = await HttpClient.getHtml(url);
+        if (!html) {
+          logger.error("SCRAPER", "Failed to fetch /jadwal/ page.");
+        } else {
+          const schedules = await adapter.getSchedule(html);
+          for (const item of schedules) {
+            try {
+              await upsertSchedule(item);
+            } catch (err) {
+              console.error(`[SCRAPER] Failed schedule ${item.animeSlug}:`, err);
+            }
           }
+          logger.log("SCRAPER", `Synced ${schedules.length} schedule entries across 7 days.`);
         }
-        logger.log("SCRAPER", `Synced ${schedules.length} schedule entries.`);
-      } else {
-        logger.error("SCRAPER", "Failed to fetch homepage for schedule.");
+      } catch (err) {
+        console.error("[SCRAPER] Error scraping schedule:", err);
       }
     }
 

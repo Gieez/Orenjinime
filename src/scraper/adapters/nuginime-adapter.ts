@@ -48,6 +48,9 @@ const DAY_MAP: Record<string, number> = {
   minggu: 0, senin: 1, selasa: 2, rabu: 3, kamis: 4, jumat: 5, jumaat: 5, sabtu: 6,
 };
 
+// Order of days rendered on samehadaku's /jadwal/ page (Senin → Minggu)
+const SCHEDULE_DAYS = ["senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu"];
+
 const TYPE_MAP: Record<string, AnimeType> = {
   tv: AnimeType.TV,
   movie: AnimeType.MOVIE,
@@ -593,23 +596,29 @@ export class NugiAnimeAdapter implements SourceAdapter {
     return this.parseEpisodeListInternal(html);
   }
 
-  public async getSchedule(html: string): Promise<ScheduleItem[]> {
+  public async getSchedule(html: string, day?: string): Promise<ScheduleItem[]> {
+    // Samehadaku's /jadwal/ page renders all 7 days in a single response
+    // — each .result-schedule block corresponds to a day in tab order:
+    //   Senin, Selasa, Rabu, Kamis, Jumat, Sabtu, Minggu
+    // (the .on class marks today's active tab, but the HTML contains all).
     const $ = cheerio.load(html);
     const results: ScheduleItem[] = [];
 
-    const activeDay = clean($("#the-days .east_days_option.on").attr("data-day"))?.toLowerCase();
-    const dayCandidates = activeDay ? [activeDay] : Object.keys(DAY_MAP);
+    // Always iterate all 7 result-schedule blocks in order
+    $(".result-schedule").each((index, el) => {
+      const dayOfWeek = SCHEDULE_DAYS[index];
+      if (!dayOfWeek) return;
+      // If caller filtered to a specific day, skip others
+      if (day && day !== dayOfWeek) return;
 
-    for (const day of dayCandidates) {
-      const dayOfWeek = day;
-      $(".result-schedule .animepost").each((_, el) => {
-        const card = $(el);
-        const href = card.find(".animposx > a[href], a[href]").first().attr("href");
+      $(el).find(".animepost").each((_, card) => {
+        const $card = $(card);
+        const href = $card.find(".animposx > a[href], a[href]").first().attr("href");
         if (!href) return;
 
         const sourceUrl = absoluteUrl(this.baseUrl, href);
         const slug = extractSlug(sourceUrl);
-        const airTime = clean(card.find(".data_tw .ltseps, .ltseps").first().text());
+        const airTime = clean($card.find(".data_tw .ltseps, .ltseps").first().text());
         if (!slug || !airTime) return;
 
         const key = `${slug}|${dayOfWeek}|${airTime}`;
@@ -622,9 +631,18 @@ export class NugiAnimeAdapter implements SourceAdapter {
           dayOfWeek,
         });
       });
-    }
+    });
 
     return results;
+  }
+
+  /**
+   * Schedule page URL — samehadaku renders all 7 days in a single
+   * /jadwal/ response (day parameter is only used to filter the result
+   * set on the parser side).
+   */
+  public scheduleUrl(_day: string): string {
+    return `${this.baseUrl}/jadwal/`;
   }
 
   public async getEpisodeStreams(html: string): Promise<StreamData> {
