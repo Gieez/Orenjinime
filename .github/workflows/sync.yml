@@ -35,18 +35,14 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: nugianime/package-lock.json
 
       - name: Install dependencies
-        working-directory: nugianime
         run: npm ci
 
       - name: Generate Prisma client
-        working-directory: nugianime
         run: npx prisma generate
 
       - name: Run sync
-        working-directory: nugianime
         env:
           JOB: ${{ github.event.inputs.job || 'all' }}
         run: |
