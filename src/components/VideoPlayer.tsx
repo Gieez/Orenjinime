@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from "react";
 
 interface ServerSource {
   type: string;
@@ -24,10 +24,13 @@ export default function VideoPlayer({
   servers,
 }: VideoPlayerProps) {
   const [selectedServer, setSelectedServer] = useState<ServerSource | null>(servers?.[0] || null);
+  const [iframeError, setIframeError] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     if (servers && servers.length > 0) {
       setSelectedServer(servers[0]);
+      setIframeError(false);
     }
   }, [servers]);
 
@@ -35,9 +38,9 @@ export default function VideoPlayer({
   if (!selectedServer || !selectedServer.url) {
     return (
       <div className="flex aspect-video flex-col items-center justify-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 p-8 text-neutral-400">
-        <p className="text-sm font-semibold text-red-400">⚠️ Sumber video (Server) tidak tersedia atau kosong.</p>
-        <p className="text-xs text-neutral-500">Silakan cek kembali server lain jika ada.</p>
-      </div>
+        <p className="text-sm font-semibold text-red-400">⚠️ Sumber video (Server) tidak tersedia atau kosong</p>
+        <p className="text-xs text-neutral-500">Silakan cek kembali server lain jika ada</p>
+     </div>
     );
   }
 
@@ -46,21 +49,31 @@ export default function VideoPlayer({
       {/* Container Video / Iframe */}
       <div className="relative aspect-video overflow-hidden rounded-xl border border-neutral-800 bg-black shadow-lg shadow-black/40">
         <iframe
+          ref={iframeRef}
           src={selectedServer.url}
           className="h-full w-full border-0"
           allowFullScreen
           loading="lazy"
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
           referrerPolicy="no-referrer-when-downgrade"
+          onLoad={() => setIframeError(false)}
         />
-      </div>
+        {iframeError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-center text-neutral-300">
+            <div>
+              <p className="mb-2 text-sm font-semibold text-amber-400">Server ini tidak dapat dimuat</p>
+              <p className="text-xs text-neutral-500">Coba pilih server lain di bawah</p>
+           </div>
+         </div>
+        )}
+     </div>
 
       {/* Pilihan Server */}
       {servers.length > 1 && (
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
             Pilih Server
-          </h3>
+         </h3>
           <div className="flex flex-wrap gap-2">
             {servers.map((server) => {
               const isSelected = selectedServer?.id === server.id;
@@ -68,7 +81,10 @@ export default function VideoPlayer({
                 <button
                   key={server.id}
                   type="button"
-                  onClick={() => setSelectedServer(server)}
+                  onClick={() => {
+                    setSelectedServer(server);
+                    setIframeError(false);
+                  }}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                     isSelected
                       ? "bg-brand text-white shadow-md"
@@ -76,12 +92,12 @@ export default function VideoPlayer({
                   }`}
                 >
                   {server.name} {server.quality ? `(${server.quality})` : ""}
-                </button>
+               </button>
               );
             })}
-          </div>
-        </div>
+         </div>
+       </div>
       )}
-    </div>
+   </div>
   );
 }
