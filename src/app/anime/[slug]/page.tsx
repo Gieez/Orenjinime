@@ -144,8 +144,15 @@ export default async function AnimeDetailPage({ params }: PageProps) {
 
   if (!anime) {
     // Construct default source URL safely (samehadaku pattern)
+    // Scrape is wrapped in try-catch + 5s timeout — never block page render
     const sourceUrl = `https://v2.samehadaku.how/anime/${slug}/`;
-    await scrapeAndSaveAnime(slug, sourceUrl);
+    try {
+      const scrapePromise = scrapeAndSaveAnime(slug, sourceUrl);
+      const timeoutPromise = new Promise((r) => setTimeout(r, 5000));
+      await Promise.race([scrapePromise, timeoutPromise]);
+    } catch (err) {
+      console.error("[ANIME-PAGE] Scrape timeout/error, continuing without:", err);
+    }
     anime = await getAnimeFromDb(slug);
   }
 
