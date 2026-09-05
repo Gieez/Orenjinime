@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { Navbar } from "@/components/Navbar";
@@ -38,6 +39,39 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Data anime bersumber dari pihak ketiga, streaming disediakan lewat API terpisah.
           </p>
         </footer>
+
+        {/* Monetag ads — loaded lazily after page interactive so they don't
+            block first paint. All zones from the active Monetag dashboard.
+            These scripts attach themselves to the DOM and manage their own
+            delivery (push notifications, vignette fullscreen, etc.). */}
+        <Script
+          id="monetag-zone-276849"
+          src="https://quge5.com/88/tag.min.js"
+          data-zone="276849"
+          strategy="lazyOnload"
+          async
+        />
+        <Script
+          id="monetag-zone-11734052"
+          strategy="lazyOnload"
+          dangerouslySetInnerHTML={{
+            __html: `(function(s){s.dataset.zone='11734052',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))`,
+          }}
+        />
+        <Script
+          id="monetag-zone-11734092"
+          strategy="lazyOnload"
+          dangerouslySetInnerHTML={{
+            __html: `(function(s){s.dataset.zone='11734092',s.src='https://n6wxm.com/vignette.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))`,
+          }}
+        />
+        <Script
+          id="monetag-zone-11734101"
+          strategy="lazyOnload"
+          dangerouslySetInnerHTML={{
+            __html: `(function(s){s.dataset.zone='11734101',s.src='https://al5sm.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))`,
+          }}
+        />
       </body>
     </html>
   );
