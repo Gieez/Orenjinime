@@ -1,7 +1,7 @@
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
+/**
+ * HTTP client for scraper — uses got-scraping (Chrome TLS fingerprint) to
+ * bypass Cloudflare. No child_process / execAsync — avoids command injection.
+ */
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -11,6 +11,18 @@ const COMMON_HEADERS: Record<string, string> = {
   "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
   Referer: "https://v2.samehadaku.how/",
 };
+
+/** Whitelist — only samehadaku.how family is allowed */
+const ALLOWED_HOSTS = ["samehadaku.how", "v2.samehadaku.how"];
+
+function isAllowedUrl(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    return ALLOWED_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith("." + h));
+  } catch {
+    return false;
+  }
+}
 
 function validateHtml(html: string, label: string): string {
   if (!html || html.length < 500) {
@@ -30,18 +42,18 @@ function validateHtml(html: string, label: string): string {
 
   if (!hasRealContent) {
     throw new Error(
-      `[${label}] Response tidak mengandung konten real (kemungkinan Cloudflare block)`
+      `[${label}] Response tidak mengandung konten real (kemungkinan Cloudflare block)`,
     );
   }
 
   return html;
 }
 
-/**
- * Jalur 1: got-scraping — bypass Cloudflare TLS fingerprinting.
- * TLS fingerprint Chrome-like, jadi Cloudflare ga block.
- */
 async function fetchViaGotScraping(url: string): Promise<string | null> {
+  if (!isAllowedUrl(url)) {
+    console.warn(`[HttpClient] Rejected non-allowed URL: ${url}`);
+    return null;
+  }
   try {
     const { gotScraping } = await import("got-scraping");
     const response = await gotScraping({
@@ -66,62 +78,66 @@ async function fetchViaGotScraping(url: string): Promise<string | null> {
   }
 }
 
-/**
- * Jalur 2: curl — bypass Cloudflare di beberapa environment.
- * Curl TLS fingerprint berbeda dari Node.js, kadang bypass Cloudflare.
- */
-async function fetchViaCurl(url: string): Promise<string | null> {
+async function fetchViaNative(url: string): Promise<string | null> {
+  if (!isAllowedUrl(url)) {
+    console.warn(`[HttpClient] Rejected non-allowed URL: ${url}`);
+    return null;
+  }
   try {
-    const command = `curl -s -L --max-time 20 ` +
-      `-H "User-Agent: ${USER_AGENT}" ` +
-      `-H "Accept-Language: id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7" ` +
-      `-H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" ` +
-      `-H "Referer: https://v2.samehadaku.how/" ` +
-      `"${url}"`;
-
-    const { stdout } = await execAsync(command, { maxBuffer: 10 * 1024 * 1024 });
-    if (stdout && stdout.length > 500) {
-      console.log(`[HttpClient] curl SUKSES: ${url} (${stdout.length} chars)`);
-      return stdout;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    const response = await fetch(url, {
+      headers: {
+        ...COMMON_HEADERS,
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    clearTimeout(timeout);
+    if (response.ok) {
+      const html = await response.text();
+      if (html && html.length > 500) {
+        console.log(`[HttpClient] native fetch SUKSES: ${url} (${html.length} chars)`);
+        return html;
+      }
     }
-    console.warn(`[HttpClient] curl response kosong/pendek: ${url}`);
+    console.warn(`[HttpClient] native fetch HTTP ${response.status}: ${url}`);
     return null;
   } catch (err: any) {
-    console.warn(`[HttpClient] curl gagal: ${err?.message}`);
+    console.warn(`[HttpClient] native fetch gagal: ${err?.message}`);
     return null;
   }
 }
 
 export class HttpClient {
   /**
-   * Fetch HTML — got-scraping primary, curl fallback.
-   * Kedua method bypass Cloudflare TLS fingerprinting.
+   * Fetch HTML — got-scraping primary, native fetch fallback.
+   * No execAsync/curl — avoids command injection.
    */
   static async getHtml(url: string): Promise<string> {
     console.log(`[HttpClient] Fetching: ${url}`);
 
-    // Jalur 1: got-scraping (Chrome TLS fingerprint)
     let html = await fetchViaGotScraping(url);
     if (html) return validateHtml(html, "got-scraping");
 
-    // Jalur 2: curl (different TLS fingerprint)
-    console.log(`[HttpClient] got-scraping gagal, fallback ke curl...`);
-    html = await fetchViaCurl(url);
-    if (html) return validateHtml(html, "curl");
+    console.log(`[HttpClient] got-scraping gagal, fallback ke native...`);
+    html = await fetchViaNative(url);
+    if (html) return validateHtml(html, "native");
 
     throw new Error(
-      `[HttpClient] Semua metode gagal fetch: ${url} (Cloudflare block)`
+      `[HttpClient] Semua metode gagal fetch: ${url} (Cloudflare block)`,
     );
   }
 
   /**
-   * Fetch JSON API — got-scraping primary, curl fallback.
-   * Skip HTML validation karena JSON ga punya HTML markers.
+   * Fetch JSON — got-scraping primary, native fetch fallback.
+   * Skip HTML validation because JSON has no HTML markers.
    */
   static async getJson(url: string): Promise<string> {
     console.log(`[HttpClient] Fetching JSON: ${url}`);
 
-    // Jalur 1: got-scraping
     try {
       const { gotScraping } = await import("got-scraping");
       const response = await gotScraping({
@@ -147,23 +163,29 @@ export class HttpClient {
       console.warn(`[HttpClient] got-scraping JSON gagal: ${err?.message}`);
     }
 
-    // Jalur 2: curl
     try {
-      const { stdout } = await execAsync(
-        `curl -s -L --max-time 15 ` +
-          `-H "User-Agent: ${USER_AGENT}" ` +
-          `-H "Accept: application/json" ` +
-          `-H "Referer: https://v2.samehadaku.how/" ` +
-          `"${url}"`,
-        { maxBuffer: 10 * 1024 * 1024 }
-      );
-      if (stdout && stdout.length > 20) {
-        JSON.parse(stdout); // Validate JSON
-        console.log(`[HttpClient] curl JSON SUKSES: ${url}`);
-        return stdout;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const response = await fetch(url, {
+        headers: {
+          ...COMMON_HEADERS,
+          Accept: "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      clearTimeout(timeout);
+      if (response.ok) {
+        const stdout = await response.text();
+        if (stdout && stdout.length > 20) {
+          JSON.parse(stdout);
+          console.log(`[HttpClient] native JSON SUKSES: ${url}`);
+          return stdout;
+        }
       }
     } catch (err: any) {
-      console.warn(`[HttpClient] curl JSON gagal: ${err?.message}`);
+      console.warn(`[HttpClient] native JSON gagal: ${err?.message}`);
     }
 
     throw new Error(`[HttpClient] Semua metode gagal fetch JSON: ${url}`);

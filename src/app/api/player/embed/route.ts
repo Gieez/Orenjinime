@@ -1,22 +1,53 @@
 export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
-import { exec } from "child_process";
-import { promisify } from "util";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
-
-const execAsync = promisify(exec);
 
 const EMBED_URL = "https://v2.samehadaku.how/wp-admin/admin-ajax.php";
 const REFERER = "https://v2.samehadaku.how/";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
+/** Whitelist of allowed redirect domains for iframe URLs */
+const ALLOWED_IFRAME_HOSTS = [
+  "samehadaku.how",
+  "v2.samehadaku.how",
+  "wsrv.nl",
+  "aniwave.to",
+  "mavishub.com",
+  "embedsito.com",
+  "aniwatch.to",
+  "megacloud.club",
+  "vidcloud.pro",
+  "sbplay.me",
+  "embtaku.pro",
+  "plyhd.link",
+  "metagets.net",
+  "asianload.cc",
+  "tenshi.id",
+];
+
+function isAllowedIframeHost(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    return ALLOWED_IFRAME_HOSTS.some(
+      (h) => u.hostname === h || u.hostname.endsWith("." + h),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Jalur 1: got-scraping — bypass Cloudflare TLS fingerprinting
  */
-async function fetchViaGotScraping(post: string, nume: string, type: string): Promise<string | null> {
+async function fetchViaGotScraping(
+  post: string,
+  nume: string,
+  type: string,
+): Promise<string | null> {
   try {
     const { gotScraping } = await import("got-scraping");
     const body = `action=player_ajax&post=${post}&nume=${nume}&type=${type}`;
@@ -48,37 +79,13 @@ async function fetchViaGotScraping(post: string, nume: string, type: string): Pr
 }
 
 /**
- * Jalur 2: curl via child_process — bypass Cloudflare di local/Ubuntu
+ * Jalur 2: native fetch — fallback (no execAsync/curl — security fix)
  */
-async function fetchViaCurl(post: string, nume: string, type: string): Promise<string | null> {
-  try {
-    const body = `action=player_ajax&post=${post}&nume=${nume}&type=${type}`;
-    const command = `curl -s -X POST "${EMBED_URL}" \
-      -H "User-Agent: ${USER_AGENT}" \
-      -H "X-Requested-With: XMLHttpRequest" \
-      -H "Referer: ${REFERER}" \
-      -H "Origin: ${REFERER.replace(/\/$/, "")}" \
-      -H "Content-Type: application/x-www-form-urlencoded; charset=UTF-8" \
-      --data-raw "${body}" \
-      --max-time 10`;
-
-    const { stdout } = await execAsync(command, { timeout: 12000 });
-    if (stdout && stdout.includes("iframe")) {
-      console.log("[Embed] curl: SUCCESS");
-      return stdout;
-    }
-    console.warn("[Embed] curl: no iframe in response");
-    return null;
-  } catch (err: any) {
-    console.warn(`[Embed] curl failed: ${err.message}`);
-    return null;
-  }
-}
-
-/**
- * Jalur 3: native fetch — fallback terakhir
- */
-async function fetchViaNative(post: string, nume: string, type: string): Promise<string | null> {
+async function fetchViaNative(
+  post: string,
+  nume: string,
+  type: string,
+): Promise<string | null> {
   try {
     const body = `action=player_ajax&post=${post}&nume=${nume}&type=${type}`;
     const controller = new AbortController();
@@ -146,8 +153,17 @@ function extractIframeUrl(html: string): string {
   return iframeUrl;
 }
 
+/** Sanitize message for safe HTML injection */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 /**
- * Error page HTML template
+ * Error page HTML template — messages are escaped to prevent XSS
  */
 function errorPage(message: string): NextResponse {
   return new NextResponse(
@@ -155,12 +171,12 @@ function errorPage(message: string): NextResponse {
     <html>
       <body style="background:#09090b;color:#a1a1aa;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;font-size:13px;">
         <div style="text-align:center;">
-          <p style="margin-bottom:8px;font-weight:600;color:#f4f4f5;">${message}</p>
+          <p style="margin-bottom:8px;font-weight:600;color:#f4f4f5;">${escapeHtml(message)}</p>
           <p style="font-size:12px;color:#71717a;">Silakan coba pilih server lain di bawah player.</p>
         </div>
       </body>
     </html>`,
-    { headers: { "Content-Type": "text/html" } }
+    { headers: { "Content-Type": "text/html" } },
   );
 }
 
@@ -173,7 +189,7 @@ export async function GET(req: NextRequest) {
     if (!rateLimit.success) {
       return NextResponse.json(
         { error: "Too many requests" },
-        { status: 429 }
+        { status: 429 },
       );
     }
 
@@ -189,11 +205,10 @@ export async function GET(req: NextRequest) {
 
     console.log(`[Embed] Fetching: post=${post}, nume=${nume}, type=${type}`);
 
-    // 3 jalur: got-scraping → curl → native fetch
+    // 2 jalur: got-scraping → native fetch (curl removed for security)
     let html: string | null = null;
 
     html = await fetchViaGotScraping(post, nume, type);
-    if (!html) html = await fetchViaCurl(post, nume, type);
     if (!html) html = await fetchViaNative(post, nume, type);
 
     if (!html) {
@@ -212,17 +227,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ iframeUrl });
     }
 
-    // Redirect to iframe URL
+    // Redirect to iframe URL — WHITELIST CHECK
     if (iframeUrl) {
+      if (!isAllowedIframeHost(iframeUrl)) {
+        console.warn(`[Embed] Blocked redirect to disallowed host: ${iframeUrl}`);
+        return errorPage("Server streaming sedang tidak dapat diakses.");
+      }
       return NextResponse.redirect(iframeUrl, { status: 302 });
     }
 
     return errorPage("Server streaming sedang tidak dapat diakses.");
-  } catch (error: any) {
-    console.error("[Embed] Unhandled error:", error.message);
+  } catch (error) {
+    console.error("[Embed] Unhandled error:", error);
     if (req.nextUrl.searchParams.get("format") !== "json") {
       return errorPage("Gagal menghubungkan ke server pemutar video.");
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

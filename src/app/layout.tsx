@@ -1,12 +1,9 @@
 import type { Metadata } from "next";
-import Script from "next/script";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { Navbar } from "@/components/Navbar";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { WelcomePopup } from "@/components/WelcomePopup";
-
-const ADSENSE_CLIENT = "ca-pub-6369400192111860";
 
 export const metadata: Metadata = {
   title: "OrenJiNime — Streaming Anime Sub Indo",
@@ -24,13 +21,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="icon" href="/Doro-Orenji.png" type="image/png" />
         <link rel="apple-touch-icon" href="/Doro-Orenji.png" />
-        <meta name="google-adsense-account" content="ca-pub-6369400192111860" />
-        <Script
-          async
-          src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
-          crossOrigin="anonymous"
-          strategy="beforeInteractive"
-        />
       </head>
       <body>
         <ServiceWorkerRegister />

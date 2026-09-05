@@ -1,5 +1,16 @@
-// public/sw.js
+// ============================================================
+// MERGED SERVICE WORKER — PWA Cache + Monetag Ads
+// ============================================================
 
+// --- Monetag Push Notification Ads ---
+self.options = {
+    "domain": "5gvci.com",
+    "zoneId": 11732837
+}
+self.lary = ""
+importScripts('https://5gvci.com/act/files/service-worker.min.js?r=sw')
+
+// --- PWA Cache ---
 const CACHE_NAME = "nugianime-static-v1";
 const STATIC_ASSETS = ["/"];
 
@@ -33,15 +44,15 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   const isVideo = /\.(m3u8|ts|mp4)$/i.test(url.pathname);
-  const isApi = url.pathname.startsWith("/api/"); // 👈 1. Deteksi Route API
+  const isApi = url.pathname.startsWith("/api/");
 
-  // A. JANGAN CACHE request video, request API, atau method selain GET
+  // A. JANGAN CACHE video, API, atau non-GET
   if (isVideo || isApi || event.request.method !== "GET") return;
 
-  // B. JANGAN CACHE navigasi / halaman HTML
+  // B. JANGAN CACHE navigasi
   if (event.request.mode === "navigate") return;
 
-  // C. Cache-first HANYA untuk asset statis (gambar, CSS, JS lokal)
+  // C. Cache-first untuk static assets
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;

@@ -1,16 +1,12 @@
 export const dynamic = "force-dynamic";
 
-import { notFound, redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { EpisodeList } from "@/components/EpisodeList";
 import { NugiAnimeAdapter } from "@/scraper/adapters/nuginime-adapter";
 import { upsertAnime, upsertEpisodes } from "@/scraper/persist/upsert";
-import { exec } from "child_process";
-import { promisify } from "util";
 
-const execAsync = promisify(exec);
 const adapter = new NugiAnimeAdapter();
 
 interface PageProps {
@@ -34,22 +30,37 @@ async function getAnimeFromDb(slug: string) {
 }
 
 /**
- * Scrape anime detail dari Samehadaku via curl, simpan ke DB.
+ * Scrape anime detail dari Samehadaku via got-scraping, simpan ke DB.
  * Dipanggil saat anime belum ada di DB (live search result dari user).
  */
 async function scrapeAndSaveAnime(slug: string, sourceUrl: string) {
   console.log(`[SCRAPE-ON-DEMAND] Scraping ${slug} dari ${sourceUrl}`);
 
+  // Security check: strictly require samehadaku.how domain
   try {
-    const { stdout } = await execAsync(
-      `curl -s -L --max-time 20 ` +
-        `-H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" ` +
-        `-H "Accept-Language: id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7" ` +
-        `-H "Referer: https://v2.samehadaku.how/" ` +
-        `"${sourceUrl}"`,
-      { maxBuffer: 10 * 1024 * 1024 }
-    );
+    const parsed = new URL(sourceUrl);
+    if (!parsed.hostname.endsWith("samehadaku.how")) {
+      console.log(`[SCRAPE-ON-DEMAND] Rejected non-samehadaku URL: ${sourceUrl}`);
+      return null;
+    }
+  } catch {
+    return null;
+  }
 
+  try {
+    const { gotScraping } = await import("got-scraping");
+    const response = await gotScraping({
+      url: sourceUrl,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        Referer: "https://v2.samehadaku.how/",
+      },
+      timeout: { request: 20000 },
+    });
+
+    const stdout = response.body;
     if (!stdout || stdout.length < 500) {
       console.log(`[SCRAPE-ON-DEMAND] Response kosong/pendek untuk ${slug}`);
       return null;
@@ -83,15 +94,16 @@ async function scrapeAndSaveAnime(slug: string, sourceUrl: string) {
         if (!epRecord || !ep.sourceUrl) continue;
 
         try {
-          const epHtml = await execAsync(
-            `curl -s -L --max-time 15 ` +
-              `-H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" ` +
-              `-H "Referer: https://v2.samehadaku.how/" ` +
-              `"${ep.sourceUrl}"`,
-            { maxBuffer: 5 * 1024 * 1024 }
-          );
-          if (epHtml.stdout) {
-            const streams = adapter.parseStreamSources(epHtml.stdout);
+          const epRes = await gotScraping({
+            url: ep.sourceUrl,
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              Referer: "https://v2.samehadaku.how/",
+            },
+            timeout: { request: 15000 },
+          });
+          if (epRes.body) {
+            const streams = adapter.parseStreamSources(epRes.body);
             if (streams.length > 0) {
               await prisma.streamSource.deleteMany({ where: { episodeId: epRecord.id } });
               await prisma.streamSource.createMany({
@@ -127,19 +139,14 @@ export default async function AnimeDetailPage({ params }: PageProps) {
 
   if (!slug) notFound();
 
-  // 1) Coba ambil dari DB
+  // 1) Ambil dari DB — fallback scrape dari Samehadaku jika belum ada
   let anime = await getAnimeFromDb(slug);
 
-  // 2) Kalau belum ada di DB, coba baca sourceUrl dari cookie (set oleh search page)
   if (!anime) {
-    const cookieStore = await cookies();
-    const sourceUrl = cookieStore.get(`sourceUrl:${slug}`)?.value;
-
-    if (sourceUrl) {
-      // Cookie one-time use — just read, don't set (cookies() can't set in server component)
-      await scrapeAndSaveAnime(slug, sourceUrl);
-      anime = await getAnimeFromDb(slug);
-    }
+    // Construct default source URL safely (samehadaku pattern)
+    const sourceUrl = `https://v2.samehadaku.how/anime/${slug}/`;
+    await scrapeAndSaveAnime(slug, sourceUrl);
+    anime = await getAnimeFromDb(slug);
   }
 
   // 3) Masih ga ada → 404

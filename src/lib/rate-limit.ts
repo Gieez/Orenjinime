@@ -29,7 +29,7 @@ setInterval(() => {
 export function checkRateLimit(
   identifier: string,
   maxRequests: number = 60,
-  windowMs: number = 60_000
+  windowMs: number = 60_000,
 ): { success: boolean; remaining: number; resetAt: number } {
   const now = Date.now();
   const entry = store.get(identifier);
@@ -49,15 +49,39 @@ export function checkRateLimit(
 }
 
 /**
+ * IPv4 format validation — used to harden IP extraction against header spoofing.
+ */
+function isValidIp(s: string): boolean {
+  // IPv4
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(s)) {
+    return s.split(".").every((p) => {
+      const n = Number(p);
+      return n >= 0 && n <= 255;
+    });
+  }
+  // IPv6 (basic — contains colons, no spaces)
+  if (s.includes(":") && !s.includes(" ")) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Get client IP from request headers.
+ * Note: Vercel sets x-forwarded-for and x-real-ip automatically. We pick the
+ * FIRST hop from x-forwarded-for which is conventionally the client IP, but
+ * we validate the format to prevent obvious garbage injection.
  */
 export function getClientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
   if (forwarded) {
-    return forwarded.split(",")[0].trim();
+    const first = forwarded.split(",")[0].trim();
+    if (first && isValidIp(first)) {
+      return first;
+    }
   }
   const realIp = request.headers.get("x-real-ip");
-  if (realIp) {
+  if (realIp && isValidIp(realIp)) {
     return realIp;
   }
   return "unknown";

@@ -1,12 +1,20 @@
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 export async function GET(
-  _req: NextRequest,
-  props: { params: Promise<{ slug: string }> }
+  req: NextRequest,
+  props: { params: Promise<{ slug: string }> },
 ) {
+  // Rate limit: 60 req/min/IP
+  const ip = getClientIp(req);
+  const rateLimit = checkRateLimit(`episodes:${ip}`, 60, 60_000);
+  if (!rateLimit.success) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   try {
     const { slug } = await props.params;
 
@@ -22,6 +30,7 @@ export async function GET(
 
     return NextResponse.json({ data: episodes });
   } catch (error) {
+    console.error("Error episodes:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

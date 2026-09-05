@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const DAY_MAP: Record<string, number> = {
   monday: 1,
@@ -11,9 +12,16 @@ const DAY_MAP: Record<string, number> = {
   sunday: 0,
 };
 
-export const revalidate = 3600; // ISR: cache 1 jam
+export const revalidate = 3600; // ISR: cache 1 hour
 
 export async function GET(request: Request) {
+  // Rate limit: 30 req/min/IP
+  const ip = getClientIp(request);
+  const rateLimit = checkRateLimit(`schedule:${ip}`, 30, 60_000);
+  if (!rateLimit.success) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   const { searchParams } = new URL(request.url);
   const day = searchParams.get("day") || "monday";
 
@@ -46,11 +54,11 @@ export async function GET(request: Request) {
     }));
 
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error) {
     console.error("[Schedule API Error]:", error);
     return NextResponse.json(
-      { error: "Gagal memuat data", details: error.message },
-      { status: 500 }
+      { error: "Gagal memuat data" },
+      { status: 500 },
     );
   }
 }

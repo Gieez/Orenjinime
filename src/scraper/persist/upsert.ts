@@ -3,10 +3,7 @@ import { AnimeDetail, EpisodeItem, StreamItem, ScheduleItem, NewsItem } from "..
 import { slugify } from "../../lib/slug";
 
 export async function upsertAnime(data: AnimeDetail & { topOrder?: number | null }) {
-  const existing = await prisma.anime.findUnique({
-    where: { slug: data.slug },
-  });
-
+  // upsert handles both create and update — no need for separate findUnique
   const anime = await prisma.anime.upsert({
     where: { slug: data.slug },
     update: {
@@ -99,7 +96,7 @@ export async function upsertAnime(data: AnimeDetail & { topOrder?: number | null
 
   return {
     id: anime.id,
-    result: (existing ? "updated" : "created") as "created" | "updated",
+    result: "upserted" as "upserted",
     anime,
   };
 }

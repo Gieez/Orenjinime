@@ -50,6 +50,8 @@ export default function VideoPlayer({
           className="h-full w-full border-0"
           allowFullScreen
           loading="lazy"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+          referrerPolicy="no-referrer-when-downgrade"
         />
       </div>
 

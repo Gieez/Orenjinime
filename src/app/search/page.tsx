@@ -71,13 +71,10 @@ function SearchContent() {
     }
   }
 
-  // Handle click pada live result: set cookie dulu, lalu navigate
-  function handleLiveResultClick(e: React.MouseEvent, anime: ExtendedAnimeCardData) {
-    if (anime.isLive && anime.sourceUrl) {
-      // Set cookie 5 menit — cukup buat server component baca
-      document.cookie = `sourceUrl:${anime.slug}=${encodeURIComponent(anime.sourceUrl)}; path=/anime/${anime.slug}; max-age=300; SameSite=Lax`;
-    }
-    // Navigate handled by <Link> — cookie sudah ter-set sebelum browser navigate
+  // Handle click pada live result: langsung navigate — server akan
+  // construct source URL dari slug di /anime/[slug] page
+  function handleLiveResultClick(_e: React.MouseEvent, _anime: ExtendedAnimeCardData) {
+    // No cookie needed — server constructs URL safely from slug
   }
 
   return (

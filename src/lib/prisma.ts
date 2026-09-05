@@ -2,12 +2,20 @@ import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-// Append connection pool params to DATABASE_URL if not already present
+/**
+ * Append connection pool params to DATABASE_URL if not already present.
+ * `connection_limit` is recognized by Prisma; `pool_timeout` is NOT a Prisma
+ * query param (PostgreSQL drivers may ignore it), so we only set the
+ * Prisma-supported param. Connection limit lowered from 15 to 5 — adequate
+ * for serverless and avoids exhausting Supabase's free-tier pool.
+ */
 function getDbUrl(): string {
   const base = process.env.DATABASE_URL || "";
+  if (!base) return base;
   const url = new URL(base);
-  if (!url.searchParams.has("connection_limit")) url.searchParams.set("connection_limit", "15");
-  if (!url.searchParams.has("pool_timeout")) url.searchParams.set("pool_timeout", "20");
+  if (!url.searchParams.has("connection_limit")) {
+    url.searchParams.set("connection_limit", "5");
+  }
   return url.toString();
 }
 
