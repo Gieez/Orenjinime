@@ -1,8 +1,9 @@
-import { prisma } from "@/lib/prisma";
+import { prisma } from "../../lib/prisma";
 import { AnimeStatus, AnimeType } from "@prisma/client";
 import { NugiAnimeAdapter } from "../adapters/nuginime-adapter";
 import { HttpClient } from "../http-client";
 import { logger } from "../utils/logger";
+import { upsertAnime, upsertEpisode, saveStreams, upsertSchedule } from "./upsert";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -19,6 +20,18 @@ function normalizeAnimeStatus(rawStatus?: string | null): AnimeStatus {
   return AnimeStatus.ONGOING;
 }
 
+/**
+ * Sync service — orchestrates the full sync workflow.
+ *
+ * Run order (matches user request: homepage first, then detail, then backfill):
+ *   - syncCatalog()    → FASE 1-3 (homepage + katalog + detail + episodes + streams)
+ *   - backfillStreams() → STEP B (episodes without streamSources)
+ *   - syncSchedule()   → STEP C (only ongoing/active anime, all 7 days)
+ *
+ * Idempotency: existing episodes with streamSources are SKIPPED. New episodes
+ * or episodes missing streams are SCRAPED. Skip check: if episode row exists
+ * AND streamSources count > 0, skip.
+ */
 export class ScraperSyncService {
   private adapter: NugiAnimeAdapter;
 
@@ -26,13 +39,17 @@ export class ScraperSyncService {
     this.adapter = new NugiAnimeAdapter();
   }
 
+  // ============================================================
+  // STEP A: HOMEPAGE-FIRST SYNC
+  // ============================================================
+
   async syncCatalog(pagesToScrape: string = "2", startPage: number = 1) {
     const totalPages = parseInt(pagesToScrape, 10) || 2;
     const allCatalogItems: any[] = [];
     let top10Items: any[] = [];
     let globalOrder = 1;
 
-    logger.log("SCRAPER", `🚀 FASE 1: Membaca Urutan Katalog (${totalPages} Halaman) & Top 10...`);
+    logger.log("SCRAPER", `🚀 STEP A1: Homepage (Top 10 + katalog ${totalPages} halaman)...`);
 
     // 1. Scrape Widget Top 10 dari Homepage
     try {
@@ -61,7 +78,7 @@ export class ScraperSyncService {
           globalOrder++;
         }
       } catch (error: any) {
-        logger.log("SCRAPER", `❌ FASE 1 Error Halaman ${page}: ${error.message}`);
+        logger.log("SCRAPER", `❌ STEP A1 Error Halaman ${page}: ${error.message}`);
         break;
       }
     }
@@ -71,15 +88,17 @@ export class ScraperSyncService {
       return { success: false, processedCount: 0 };
     }
 
-    logger.log("SCRAPER", `✅ FASE 1 Selesai. Menyiapkan database atomic transaction...`);
+    logger.log(
+      "SCRAPER",
+      `✅ STEP A1 Selesai. Katalog: ${allCatalogItems.length}, Top 10: ${top10Items.length}. Upsert ke DB...`,
+    );
 
-    // FASE 2: ATOMIC DATABASE UPDATE
+    // FASE 2: ATOMIC DATABASE UPDATE (catalog + top 10 metadata)
     const scrapedSlugs = allCatalogItems.map((i) => i.slug);
 
     try {
       await prisma.$transaction(
-        async (tx) => {
-          // Reset latestOrder & topOrder lama jika mulai dari page 1
+        async (tx: any) => {
           if (startPage === 1) {
             await tx.anime.updateMany({
               where: {
@@ -95,7 +114,6 @@ export class ScraperSyncService {
             });
           }
 
-          // Save / Update Catalog Items secara sekuensial dalam transaksi agar aman dari deadlock
           for (const item of allCatalogItems) {
             const sourceUrl = item.sourceUrl || `${this.adapter.baseUrl}/anime/${item.slug}/`;
             await tx.anime.upsert({
@@ -117,7 +135,6 @@ export class ScraperSyncService {
             });
           }
 
-          // Save / Update Top 10 Items secara sekuensial
           for (const item of top10Items) {
             const sourceUrl = item.url || `${this.adapter.baseUrl}/anime/${item.slug}/`;
             await tx.anime.upsert({
@@ -143,17 +160,23 @@ export class ScraperSyncService {
         {
           maxWait: 10000,
           timeout: 30000,
-        }
+        },
       );
-      logger.log("SCRAPER", `✅ FASE 2 Selesai. Homepage Frontend sekarang sudah tersinkronisasi!`);
+      logger.log("SCRAPER", `✅ STEP A2 Selesai. Anime metadata ter-update.`);
     } catch (dbError: any) {
-      logger.log("SCRAPER", `❌ FASE 2 Database Error: ${dbError.message}`);
+      logger.log("SCRAPER", `❌ STEP A2 Database Error: ${dbError.message}`);
       return { success: false, processedCount: 0 };
     }
 
-    // FASE 3: ENRICHMENT DETAIL & EPISODE
-    logger.log("SCRAPER", `🚀 FASE 3: Menarik data Detail, Episode & Video Stream...`);
+    // FASE 3: ENRICHMENT — detail + ALL episodes + streams
+    logger.log(
+      "SCRAPER",
+      `🚀 STEP A3: Detail + episode + stream untuk ${allCatalogItems.length + top10Items.length} anime...`,
+    );
     let totalProcessed = 0;
+    let totalSkipped = 0;
+    let totalNewEpisodes = 0;
+    let totalNewStreams = 0;
 
     const itemsToProcessMap = new Map<string, any>();
     [...allCatalogItems, ...top10Items].forEach((item) => {
@@ -163,17 +186,42 @@ export class ScraperSyncService {
     });
 
     for (const item of Array.from(itemsToProcessMap.values())) {
-      await this.syncAnimeItem(item);
-      totalProcessed++;
-      await sleep(300);
+      const result = await this.syncAnimeItem(item);
+      if (result) {
+        totalProcessed++;
+        totalNewEpisodes += result.newEpisodes || 0;
+        totalNewStreams += result.newStreams || 0;
+      } else {
+        totalSkipped++;
+      }
+      await sleep(500);
     }
 
-    return { success: true, processedCount: totalProcessed };
+    logger.log(
+      "SCRAPER",
+      `✅ STEP A selesai. Processed: ${totalProcessed}, Skipped: ${totalSkipped}, New episodes: ${totalNewEpisodes}, New streams: ${totalNewStreams}.`,
+    );
+
+    return { success: true, processedCount: totalProcessed, totalNewEpisodes, totalNewStreams };
   }
 
+  /**
+   * Process a single anime — scrape detail, parse ALL episodes, scrape
+   * streams for any episode that doesn't have them yet. Idempotent.
+   *
+   * Skip conditions:
+   *  - If ALL episodes in detail page already exist in DB AND have streamSources,
+   *    skip everything (no API call needed for streams).
+   *
+   * Otherwise:
+   *  - Upsert detail metadata (synopsis, rating, status, etc.)
+   *  - For each episode in detail:
+   *    - If episode exists in DB with streamSources: skip (already done)
+   *    - Else: upsert episode + scrape episode page + save streams
+   */
   public async syncAnimeItem(item: any) {
     const sourceUrl = item.sourceUrl || item.url || `${this.adapter.baseUrl}/anime/${item.slug}/`;
-    logger.log("SCRAPER", `Processing Data: ${item.title}`);
+    logger.log("SCRAPER", `Processing: ${item.title}`);
 
     let detailHtml = "";
     try {
@@ -183,8 +231,10 @@ export class ScraperSyncService {
       return null;
     }
 
-    const detail = detailHtml ? this.adapter.parseAnimeDetail(detailHtml, sourceUrl) : null;
-    const parsedEpisodes = detailHtml ? this.adapter.parseEpisodeList(detailHtml, item.slug) : [];
+    if (!detailHtml) return null;
+
+    const detail = this.adapter.parseAnimeDetail(detailHtml, sourceUrl);
+    const parsedEpisodes = this.adapter.parseEpisodeList(detailHtml, item.slug);
 
     const rawStatus = detail?.status || item.status;
     const finalStatus = normalizeAnimeStatus(rawStatus);
@@ -199,6 +249,39 @@ export class ScraperSyncService {
       }
     });
 
+    // Quick check: do we have ALL episodes in DB and all have streams?
+    const existing = await prisma.anime.findUnique({
+      where: { slug: item.slug },
+      include: { episodes: { include: { streamSources: { select: { id: true } } } } },
+    });
+
+    if (existing && parsedEpisodes.length > 0) {
+      const existingByNum = new Map<number, { hasStream: boolean }>();
+      for (const e of existing.episodes) {
+        existingByNum.set(e.episodeNumber, { hasStream: e.streamSources.length > 0 });
+      }
+
+      const allEpisodesKnown = parsedEpisodes.every(
+        (ep) => existingByNum.has(ep.episodeNumber) && existingByNum.get(ep.episodeNumber)!.hasStream,
+      );
+
+      if (allEpisodesKnown) {
+        // Update metadata only (rating, synopsis may have changed) — no streams to re-scrape
+        await prisma.anime.update({
+          where: { slug: item.slug },
+          data: {
+            rating: detail?.rating ?? undefined,
+            synopsis: detail?.synopsis,
+            studio: detail?.studio,
+            status: finalStatus,
+            latestEpisodeRelease: latestRelease || undefined,
+          },
+        });
+        return { newEpisodes: 0, newStreams: 0, skipped: true };
+      }
+    }
+
+    // Update metadata
     const animeRecord = await prisma.anime.update({
       where: { slug: item.slug },
       data: {
@@ -210,13 +293,39 @@ export class ScraperSyncService {
       },
     });
 
-    // Mengambil 3 episode paling baru (jika sudah di-sort ascending, ambil 3 dari paling belakang)
-    const episodesToProcess = parsedEpisodes.slice(-3).reverse();
+    // Process ALL episodes from detail (not just 3 latest)
+    let newEpisodes = 0;
+    let newStreams = 0;
 
-    for (const ep of episodesToProcess) {
+    for (const ep of parsedEpisodes) {
       if (!ep.episodeNumber) continue;
       const releaseDate = ep.releasedAt ? new Date(ep.releasedAt) : null;
 
+      // Check if episode already exists with streams
+      const existingEp = await prisma.episode.findUnique({
+        where: {
+          animeId_episodeNumber: { animeId: animeRecord.id, episodeNumber: ep.episodeNumber },
+        },
+        include: { streamSources: { select: { id: true } } },
+      });
+
+      if (existingEp && existingEp.streamSources.length > 0) {
+        // Already have streams — just update metadata if needed
+        if (ep.title || ep.sourceUrl || releaseDate) {
+          await prisma.episode.update({
+            where: { id: existingEp.id },
+            data: {
+              title: ep.title,
+              sourceUrl: ep.sourceUrl,
+              releasedAt: releaseDate,
+              lastScrapedAt: new Date(),
+            },
+          });
+        }
+        continue;
+      }
+
+      // Need to create or update episode + scrape streams
       const episodeRecord = await prisma.episode.upsert({
         where: {
           animeId_episodeNumber: { animeId: animeRecord.id, episodeNumber: ep.episodeNumber },
@@ -236,6 +345,7 @@ export class ScraperSyncService {
           lastScrapedAt: new Date(),
         },
       });
+      newEpisodes++;
 
       if (ep.sourceUrl) {
         try {
@@ -243,9 +353,8 @@ export class ScraperSyncService {
           const streamSources = this.adapter.parseStreamSources(epHtml);
 
           if (streamSources.length > 0) {
-            // Resolve proxy URLs → direct iframe URLs at sync time so that
-            // at runtime the browser loads the streaming host directly
-            // (bypasses Cloudflare blocking that affects Vercel serverless).
+            // Resolve proxy URLs to direct iframe URLs (bypasses Cloudflare
+            // blocking on Vercel serverless IPs at runtime)
             const proxyUrls = streamSources
               .map((s) => s.url)
               .filter((u) => u.startsWith("/api/player/embed"));
@@ -253,7 +362,7 @@ export class ScraperSyncService {
 
             const finalStreams = streamSources.map((s) => ({
               ...s,
-              url: resolved.get(s.url) || s.url, // fall back to proxy if resolve failed
+              url: resolved.get(s.url) || s.url,
             }));
 
             await prisma.streamSource.deleteMany({ where: { episodeId: episodeRecord.id } });
@@ -265,12 +374,185 @@ export class ScraperSyncService {
                 quality: stream.quality || "HD",
               })),
             });
+            newStreams += finalStreams.length;
           }
         } catch (streamErr) {
           console.error(`[SCRAPER] Stream error ep ${ep.episodeNumber}:`, streamErr);
         }
       }
     }
-    return animeRecord;
+
+    return { newEpisodes, newStreams, skipped: false };
+  }
+
+  // ============================================================
+  // STEP B: BACKFILL — anime in DB with episodes but no streams
+  // ============================================================
+
+  /**
+   * Find all anime whose episodes are missing streamSources and try to
+   * scrape them. Skip anime that already have streams everywhere.
+   *
+   * This handles the case where an anime was added to DB but its episodes
+   * never had streams (e.g. from older sync runs that only did 3 episodes).
+   */
+  async backfillStreams(maxAnime: number = 100) {
+    logger.log("SCRAPER", `🚀 STEP B: Backfill streams untuk anime tanpa streams...`);
+
+    // Find anime with at least one episode without streams
+    const candidates = await prisma.anime.findMany({
+      where: {
+        episodes: { some: { streamSources: { none: {} } } },
+      },
+      include: {
+        episodes: {
+          where: { streamSources: { none: {} } },
+          select: { id: true, episodeNumber: true, sourceUrl: true },
+        },
+      },
+      take: maxAnime,
+    });
+
+    logger.log(
+      "SCRAPER",
+      `  Found ${candidates.length} anime needing backfill.`,
+    );
+
+    let totalEpisodesProcessed = 0;
+    let totalStreamsAdded = 0;
+    let totalFailed = 0;
+
+    for (const anime of candidates) {
+      logger.log(
+        "SCRAPER",
+        `  Backfilling ${anime.title} (${anime.episodes.length} eps without streams)...`,
+      );
+
+      for (const ep of anime.episodes) {
+        if (!ep.sourceUrl) {
+          // Try to construct sourceUrl from slug if missing
+          const sourceUrl = `${this.adapter.baseUrl}/anime/${anime.slug}-episode-${ep.episodeNumber}/`;
+          await prisma.episode.update({
+            where: { id: ep.id },
+            data: { sourceUrl },
+          });
+          ep.sourceUrl = sourceUrl;
+        }
+
+        try {
+          const epHtml = await HttpClient.getHtml(ep.sourceUrl);
+          const streamSources = this.adapter.parseStreamSources(epHtml);
+
+          if (streamSources.length > 0) {
+            const proxyUrls = streamSources
+              .map((s) => s.url)
+              .filter((u) => u.startsWith("/api/player/embed"));
+            const resolved = await this.adapter.resolveStreamUrls(proxyUrls);
+
+            const finalStreams = streamSources.map((s) => ({
+              ...s,
+              url: resolved.get(s.url) || s.url,
+            }));
+
+            await prisma.streamSource.deleteMany({ where: { episodeId: ep.id } });
+            await prisma.streamSource.createMany({
+              data: finalStreams.map((stream) => ({
+                episodeId: ep.id,
+                name: stream.name,
+                url: stream.url,
+                quality: stream.quality || "HD",
+              })),
+            });
+            totalStreamsAdded += finalStreams.length;
+            totalEpisodesProcessed++;
+          } else {
+            totalFailed++;
+          }
+        } catch (err) {
+          totalFailed++;
+          console.error(`[SCRAPER] Backfill failed ${anime.slug} ep ${ep.episodeNumber}:`, err);
+        }
+        await sleep(800);
+      }
+    }
+
+    logger.log(
+      "SCRAPER",
+      `✅ STEP B selesai. Episodes processed: ${totalEpisodesProcessed}, streams added: ${totalStreamsAdded}, failed: ${totalFailed}.`,
+    );
+
+    return {
+      success: true,
+      animeProcessed: candidates.length,
+      episodesProcessed: totalEpisodesProcessed,
+      streamsAdded: totalStreamsAdded,
+      failed: totalFailed,
+    };
+  }
+
+  // ============================================================
+  // STEP C: SCHEDULE — only ongoing anime
+  // ============================================================
+
+  /**
+   * Sync release schedule. Samehadaku's /jadwal/ page returns all 7 days
+   * in a single response. We only upsert entries for anime that exist in
+   * DB AND are ongoing/active — completed anime are dropped from schedule
+   * (they don't get new air times).
+   */
+  async syncSchedule() {
+    logger.log("SCRAPER", "🚀 STEP C: Schedule sync (all 7 days, ongoing only)...");
+
+    try {
+      const url = this.adapter.scheduleUrl("all");
+      const html = await HttpClient.getHtml(url);
+      if (!html) {
+        logger.log("SCRAPER", "❌ STEP C: Failed to fetch /jadwal/ page.");
+        return { success: false };
+      }
+
+      const allSchedules = await this.adapter.getSchedule(html);
+
+      // Filter: only keep schedules where anime exists in DB and is ongoing
+      const slugs: string[] = [
+        ...new Set(
+          allSchedules
+            .map((s) => s.animeSlug)
+            .filter((s): s is string => typeof s === "string" && s.length > 0),
+        ),
+      ];
+      const animeInDb = await prisma.anime.findMany({
+        where: { slug: { in: slugs } },
+        select: { slug: true, status: true },
+      });
+      const ongoingSlugs = new Set(
+        animeInDb.filter((a: any) => a.status === AnimeStatus.ONGOING).map((a: any) => a.slug),
+      );
+
+      let totalSynced = 0;
+      let totalSkipped = 0;
+      for (const item of allSchedules) {
+        if (!item.animeSlug || !ongoingSlugs.has(item.animeSlug)) {
+          totalSkipped++;
+          continue;
+        }
+        try {
+          await upsertSchedule(item);
+          totalSynced++;
+        } catch (err) {
+          console.error(`[SCRAPER] Schedule failed ${item.animeSlug}:`, err);
+        }
+      }
+
+      logger.log(
+        "SCRAPER",
+        `✅ STEP C selesai. Synced: ${totalSynced}, skipped (not ongoing/missing): ${totalSkipped}.`,
+      );
+
+      return { success: true, synced: totalSynced, skipped: totalSkipped };
+    } catch (err) {
+      logger.log("SCRAPER", `❌ STEP C error: ${err instanceof Error ? err.message : String(err)}`);
+      return { success: false };
+    }
   }
 }

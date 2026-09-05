@@ -14,6 +14,7 @@
     "db:studio": "prisma studio",
     "scrape": "tsx src/scraper/index.ts",
     "scrape:catalog": "tsx src/scraper/index.ts --job=catalog",
+    "scrape:backfill": "tsx src/scraper/index.ts --job=backfill",
     "scrape:schedule": "tsx src/scraper/index.ts --job=schedule",
     "scrape:news": "tsx src/scraper/index.ts --job=news",
     "seed": "tsx src/scheduler/seed.ts",

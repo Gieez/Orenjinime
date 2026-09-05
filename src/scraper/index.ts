@@ -1,18 +1,23 @@
 import { prisma } from "../lib/prisma";
 import { HttpClient } from "./http-client";
 import { NugiAnimeAdapter } from "./adapters/nuginime-adapter";
+import { ScraperSyncService } from "./persist/sync";
 import { logger } from "./utils/logger";
-import { upsertSchedule } from "./persist/upsert";
 
 const adapter = new NugiAnimeAdapter();
+const service = new ScraperSyncService();
 
-// Samehadaku uses Indonesian day slugs
+// Indonesian day slugs used by samehadaku
 const SCHEDULE_DAYS = ["senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu"];
 
-function parseJobArg(): "catalog" | "schedule" | "news" | "all" {
+type JobName = "catalog" | "backfill" | "schedule" | "all";
+
+function parseJobArg(): JobName {
   const arg = process.argv.find((a) => a.startsWith("--job="));
   const value = arg?.split("=")[1];
-  if (value === "catalog" || value === "schedule" || value === "news") return value;
+  if (value === "catalog" || value === "backfill" || value === "schedule" || value === "all") {
+    return value;
+  }
   return "all";
 }
 
@@ -34,31 +39,30 @@ async function main() {
   logger.log("SCRAPER", `Running scraper job: [${job.toUpperCase()}]`);
 
   try {
-    if (job === "schedule" || job === "all") {
-      logger.log("SCRAPER", "Starting schedule scrape...");
+    if (job === "catalog" || job === "all") {
+      logger.log("SCRAPER", "→ STEP A: catalog (homepage + katalog + episodes + streams)");
+      const result = await service.syncCatalog("2", 1);
+      logger.log(
+        "SCRAPER",
+        `STEP A done. processed=${result.processedCount}, newEps=${result.totalNewEpisodes}, newStreams=${result.totalNewStreams}`,
+      );
+    }
 
-      // Samehadaku /jadwal/ page renders all 7 days in one response —
-      // single fetch + parser maps .result-schedule blocks to day-of-week
-      // by index. No need to loop per day.
-      try {
-        const url = adapter.scheduleUrl("all");
-        const html = await HttpClient.getHtml(url);
-        if (!html) {
-          logger.error("SCRAPER", "Failed to fetch /jadwal/ page.");
-        } else {
-          const schedules = await adapter.getSchedule(html);
-          for (const item of schedules) {
-            try {
-              await upsertSchedule(item);
-            } catch (err) {
-              console.error(`[SCRAPER] Failed schedule ${item.animeSlug}:`, err);
-            }
-          }
-          logger.log("SCRAPER", `Synced ${schedules.length} schedule entries across 7 days.`);
-        }
-      } catch (err) {
-        console.error("[SCRAPER] Error scraping schedule:", err);
-      }
+    if (job === "backfill" || job === "all") {
+      logger.log("SCRAPER", "→ STEP B: backfill streams for episodes missing sources");
+      const result = await service.backfillStreams(200);
+      logger.log(
+        "SCRAPER",
+        `STEP B done. anime=${result.animeProcessed}, eps=${result.episodesProcessed}, streams=${result.streamsAdded}, failed=${result.failed}`,
+      );
+    }
+
+    if (job === "schedule" || job === "all") {
+      logger.log("SCRAPER", "→ STEP C: schedule (all 7 days, ongoing only)");
+      const result = await service.syncSchedule();
+      const synced = result.synced ?? 0;
+      const skipped = result.skipped ?? 0;
+      logger.log("SCRAPER", `STEP C done. synced=${synced}, skipped=${skipped}`);
     }
 
     logger.log("SCRAPER", "All tasks completed successfully.");

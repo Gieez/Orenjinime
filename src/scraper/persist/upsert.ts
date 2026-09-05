@@ -2,8 +2,33 @@ import { prisma } from "../../lib/prisma";
 import { AnimeDetail, EpisodeItem, StreamItem, ScheduleItem, NewsItem } from "../adapters/types";
 import { slugify } from "../../lib/slug";
 
+/**
+ * Sync strategy (per session):
+ *  - STEP A: FASE 1-3 — homepage first
+ *      1. Scrape samehadaku.how/ — Top 10 + katalog (2 pages)
+ *      2. Upsert all catalog items
+ *      3. For each, scrape detail page (synopsis, genre, rating, status)
+ *      4. Upsert all episodes (skip if exists, only update if missing fields)
+ *      5. For each new episode, scrape stream sources (skip if already has)
+ *
+ *  - STEP B: BACKFILL
+ *      - Find anime with episodes but no streamSources
+ *      - Scrape stream sources for those episodes
+ *      - Resolve proxy URLs to direct streaming host URLs
+ *
+ *  - STEP C: SCHEDULE
+ *      - Scrape /jadwal/ once (all 7 days in single response)
+ *      - Only keep entries for ONGOING/active anime
+ *
+ * Cloudflare note: got-scraping has Chrome TLS fingerprint but on
+ * serverless/headless IPs (Vercel, GH Actions runners) it gets
+ * challenged. The scraper should be run from a residential-IP env
+ * (local dev, VPS, GH Action runner with proxy) — and the resolved
+ * direct URLs are stored in DB so the production Vercel site never
+ * has to hit samehadaku's protected AJAX endpoint.
+ */
+
 export async function upsertAnime(data: AnimeDetail & { topOrder?: number | null }) {
-  // upsert handles both create and update — no need for separate findUnique
   const anime = await prisma.anime.upsert({
     where: { slug: data.slug },
     update: {
@@ -19,9 +44,7 @@ export async function upsertAnime(data: AnimeDetail & { topOrder?: number | null
       rating: data.rating ?? null,
       popularity: data.popularity ?? 0,
       sourceUrl: data.sourceUrl,
-      // Update latestOrder jika terdefinisi
       ...(data.latestOrder !== undefined ? { latestOrder: data.latestOrder } : {}),
-      // ✅ Tambahkan handling topOrder agar bisa ter-update ke DB
       ...(data.topOrder !== undefined ? { topOrder: data.topOrder } : {}),
     },
     create: {
@@ -39,7 +62,6 @@ export async function upsertAnime(data: AnimeDetail & { topOrder?: number | null
       popularity: data.popularity ?? 0,
       sourceUrl: data.sourceUrl,
       latestOrder: data.latestOrder ?? null,
-      // ✅ Masukkan topOrder ke create
       topOrder: data.topOrder ?? null,
     },
   });
@@ -113,6 +135,7 @@ export async function upsertEpisode(animeId: string, item: EpisodeItem) {
       title: item.title ?? null,
       sourceUrl: item.sourceUrl,
       releasedAt: item.releasedAt ?? null,
+      lastScrapedAt: new Date(),
     },
     create: {
       animeId,
@@ -120,6 +143,7 @@ export async function upsertEpisode(animeId: string, item: EpisodeItem) {
       title: item.title ?? null,
       sourceUrl: item.sourceUrl,
       releasedAt: item.releasedAt ?? null,
+      lastScrapedAt: new Date(),
     },
   });
 }
@@ -132,15 +156,44 @@ export async function upsertEpisodes(animeId: string, items: EpisodeItem[]) {
   return results;
 }
 
-export async function saveStreams(episodeId: string, streams: StreamItem[]) {
+/**
+ * Save streams for an episode. Resolves proxy URLs to direct iframe URLs
+ * so the production Vercel site never has to hit samehadaku's protected
+ * AJAX endpoint at runtime (which gets Cloudflare-blocked on serverless IPs).
+ *
+ * If resolution fails for a particular proxy, falls back to keeping the
+ * proxy URL — embed route still works in local dev.
+ */
+export async function saveStreams(
+  episodeId: string,
+  streams: StreamItem[],
+  resolver?: (proxyUrls: string[]) => Promise<Map<string, string>>,
+) {
   const db = prisma as unknown as Record<string, any>;
   const targetModel = db.episodeStream ? db.episodeStream : db.stream;
 
   if (targetModel) {
     await targetModel.deleteMany({ where: { episodeId } });
     if (streams.length > 0) {
+      let finalUrls = streams;
+      if (resolver) {
+        const proxyUrls = streams
+          .map((s) => s.url)
+          .filter((u) => u.startsWith("/api/player/embed"));
+        if (proxyUrls.length > 0) {
+          try {
+            const resolved = await resolver(proxyUrls);
+            finalUrls = streams.map((s) => ({
+              ...s,
+              url: resolved.get(s.url) || s.url,
+            }));
+          } catch (err) {
+            console.error(`[saveStreams] Resolve failed for ep ${episodeId}:`, err);
+          }
+        }
+      }
       await targetModel.createMany({
-        data: streams.map((s: StreamItem) => ({
+        data: finalUrls.map((s: StreamItem) => ({
           episodeId,
           name: s.name,
           url: s.url,

@@ -1,0 +1,65 @@
+name: Sync OrenJiNime from Samehadaku
+
+on:
+  # Cron setiap 3 jam — frequency rendah karena dataset besar (500+ anime)
+  schedule:
+    - cron: "0 */3 * * *"
+  # Manual trigger dari GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Job to run"
+        required: true
+        type: choice
+        default: "all"
+        options:
+          - all
+          - catalog
+          - backfill
+          - schedule
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: nugianime/package-lock.json
+
+      - name: Install dependencies
+        working-directory: nugianime
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: nugianime
+        run: npx prisma generate
+
+      - name: Run sync
+        working-directory: nugianime
+        env:
+          JOB: ${{ github.event.inputs.job || 'all' }}
+        run: |
+          echo "Running sync job: $JOB"
+          case "$JOB" in
+            catalog)  npm run scrape:catalog ;;
+            backfill) npm run scrape:backfill ;;
+            schedule) npm run scrape:schedule ;;
+            all)      npx tsx scripts/sync.ts ;;
+            *)        echo "Unknown job: $JOB" && exit 1 ;;
+          esac
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Sync job failed — check GH Actions logs"
