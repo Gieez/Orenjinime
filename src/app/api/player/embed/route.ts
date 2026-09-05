@@ -27,6 +27,11 @@ const ALLOWED_IFRAME_HOSTS = [
   "metagets.net",
   "asianload.cc",
   "tenshi.id",
+  // Streaming server domains seen in episode pages
+  "blogspot.com",
+  "wibufile.com",
+  "mega.nz",
+  "blogger.com",
 ];
 
 function isAllowedIframeHost(urlStr: string): boolean {

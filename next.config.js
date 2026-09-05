@@ -20,7 +20,8 @@ const nextConfig = {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https://i.scdn.co https://*.scdn.co https://*.spotifycdn.com https://i.ytimg.com https://lh3.googleusercontent.com https://v2.samehadaku.how https://*.samehadaku.how",
       "font-src 'self' data:",
-      "frame-src https://v2.samehadaku.how https://*.samehadaku.how https://wsrv.nl https://*.aniwave.to https://mavishub.com https://embedsito.com",
+      // Embed destinations — covers iframe redirects from /api/player/embed proxy
+      "frame-src 'self' https://v2.samehadaku.how https://*.samehadaku.how https://wsrv.nl https://*.aniwave.to https://mavishub.com https://embedsito.com https://*.aniwatch.to https://megacloud.club https://*.megacloud.club https://vidcloud.pro https://*.vidcloud.pro https://sbplay.me https://embtaku.pro https://*.embtaku.pro https://plyhd.link https://*.plyhd.link https://metagets.net https://asianload.cc https://*.asianload.cc https://tenshi.id https://*.tenshi.id https://*.blogspot.com https://*.wibufile.com https://mega.nz https://*.mega.nz",
       "connect-src 'self' https://*.ingest.us.sentry.io https://*.sentry.io https://v2.samehadaku.how https://*.samehadaku.how",
       "worker-src 'self' blob:",
       "form-action 'self'",
