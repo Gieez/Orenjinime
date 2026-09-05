@@ -545,7 +545,7 @@ export class NugiAnimeAdapter implements SourceAdapter {
     return top10List.sort((a, b) => a.rank - b.rank).slice(0, 10);
   }
 
-  public parseStreamSources(html: string): StreamSourceResult[] {
+  public parseStreamSources(html: string, resolveProxy: boolean = false): StreamSourceResult[] {
     const $ = cheerio.load(html);
     const sources: StreamSourceResult[] = [];
 
@@ -563,6 +563,13 @@ export class NugiAnimeAdapter implements SourceAdapter {
       else if (/720p/i.test(name)) quality = "720p";
       else if (/1080p/i.test(name)) quality = "1080p";
 
+      // When resolveProxy=false (default, used by /api/player/embed runtime),
+      // keep the proxy URL so the request resolves samehadaku fresh each time
+      // (Vercel -> samehadaku; usually blocked by Cloudflare but works locally).
+      // When resolveProxy=true (sync time, runs in local scraper),
+      // resolve to the direct iframe URL by hitting the samehadaku AJAX endpoint
+      // and store the resolved URL in DB. At runtime the iframe just loads the
+      // direct streaming host (wibufile/mega/blogspot) — no Vercel proxy needed.
       const proxyUrl = `/api/player/embed?post=${encodeURIComponent(post)}&nume=${encodeURIComponent(nume)}&type=${encodeURIComponent(type)}`;
       if (!sources.some((source) => source.url === proxyUrl)) {
         sources.push({ name, url: proxyUrl, type: "embed", quality });
@@ -586,6 +593,78 @@ export class NugiAnimeAdapter implements SourceAdapter {
     }
 
     return sources;
+  }
+
+  /**
+   * Resolve proxy stream URLs to their direct iframe URL by hitting the
+   * samehadaku admin-ajax endpoint. Used only at sync time (local scraper)
+   * so the stored DB URLs can be loaded directly by the browser without
+   * going through /api/player/embed (which gets blocked by Cloudflare when
+   * called from Vercel's serverless IP range).
+   *
+   * Returns a map from proxy URL → resolved direct URL. If resolution fails
+   * for a given proxy, that entry is omitted (caller should keep proxy).
+   */
+  public async resolveStreamUrls(proxyUrls: string[]): Promise<Map<string, string>> {
+    const resolved = new Map<string, string>();
+    for (const proxyUrl of proxyUrls) {
+      try {
+        const m = proxyUrl.match(/post=([^&]+)&nume=([^&]+)&type=([^&]+)/);
+        if (!m) continue;
+        const [, post, nume, type] = m;
+        const html = await this.fetchPlayerAjax(decodeURIComponent(post), decodeURIComponent(nume), decodeURIComponent(type));
+        if (!html) continue;
+        const direct = this.extractDirectIframeUrl(html);
+        if (direct) {
+          resolved.set(proxyUrl, direct);
+        }
+      } catch {
+        // skip — keep proxy
+      }
+      // Light throttle to avoid hammering samehadaku
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    return resolved;
+  }
+
+  private async fetchPlayerAjax(post: string, nume: string, type: string): Promise<string | null> {
+    const EMBED_URL = `${this.baseUrl}/wp-admin/admin-ajax.php`;
+    const REFERER = `${this.baseUrl}/`;
+    const UA =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+    try {
+      const { gotScraping } = await import("got-scraping");
+      const res = await gotScraping({
+        method: "POST",
+        url: EMBED_URL,
+        headers: {
+          "User-Agent": UA,
+          "X-Requested-With": "XMLHttpRequest",
+          Referer: REFERER,
+          Origin: this.baseUrl,
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        },
+        body: `action=player_ajax&post=${post}&nume=${nume}&type=${type}`,
+        timeout: { request: 10000 },
+      });
+      if (res.statusCode === 200 && res.body) return res.body;
+    } catch {
+      // fall through
+    }
+    return null;
+  }
+
+  private extractDirectIframeUrl(html: string): string | null {
+    const $ = (require("cheerio") as typeof import("cheerio")).load(html);
+    let url = $("iframe").attr("src") || $("iframe").attr("data-src") || $("iframe").attr("data-lazy-src") || "";
+    if (!url) {
+      const m = html.match(/src=["']([^"']+)["']/i);
+      if (m && m[1] && !m[1].includes("cloudflare.com")) url = m[1];
+    }
+    if (!url) return null;
+    url = url.replace(/\\/g, "").trim().replace(/[;,]+$/, "");
+    if (url.startsWith("//")) url = "https:" + url;
+    return url;
   }
 
   public async getAnimeDetails(html: string, sourceUrl: string): Promise<AnimeDetail> {

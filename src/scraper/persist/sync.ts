@@ -243,9 +243,22 @@ export class ScraperSyncService {
           const streamSources = this.adapter.parseStreamSources(epHtml);
 
           if (streamSources.length > 0) {
+            // Resolve proxy URLs → direct iframe URLs at sync time so that
+            // at runtime the browser loads the streaming host directly
+            // (bypasses Cloudflare blocking that affects Vercel serverless).
+            const proxyUrls = streamSources
+              .map((s) => s.url)
+              .filter((u) => u.startsWith("/api/player/embed"));
+            const resolved = await this.adapter.resolveStreamUrls(proxyUrls);
+
+            const finalStreams = streamSources.map((s) => ({
+              ...s,
+              url: resolved.get(s.url) || s.url, // fall back to proxy if resolve failed
+            }));
+
             await prisma.streamSource.deleteMany({ where: { episodeId: episodeRecord.id } });
             await prisma.streamSource.createMany({
-              data: streamSources.map((stream) => ({
+              data: finalStreams.map((stream) => ({
                 episodeId: episodeRecord.id,
                 name: stream.name,
                 url: stream.url,
